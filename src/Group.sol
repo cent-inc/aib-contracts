@@ -7,7 +7,7 @@ pragma solidity 0.6.12;
 /**
  * A Group has 1 admin and 1+ members
  */
-contract Group is BaseRelayRecipient{
+contract Group is BaseRelayRecipient {
     using EnumerableSet for EnumerableSet.AddressSet;
 
     address private admin;
@@ -52,8 +52,8 @@ contract Group is BaseRelayRecipient{
      * @dev function accept admin nomination a new admin
      */
     function acceptAdmin() public {
-        require(_msgSender() != NULL_ADDRESS, 'Group: No nominee');
-        require(_msgSender() == nominatedAdmin, 'Group: Incorrect nominee');
+        require(nominatedAdmin != NULL_ADDRESS, 'Group: No nominee');
+        require(nominatedAdmin == _msgSender(), 'Group: Incorrect nominee');
         admin = nominatedAdmin;
         nominatedAdmin = NULL_ADDRESS;
     }
