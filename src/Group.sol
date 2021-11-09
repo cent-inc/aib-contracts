@@ -51,7 +51,7 @@ contract Group is BaseRelayRecipient{
     /**
      * @dev function accept admin nomination a new admin
      */
-    function acceptAdmin() {
+    function acceptAdmin() public {
         require(_msgSender() != NULL_ADDRESS, 'Group: No nominee');
         require(_msgSender() == nominatedAdmin, 'Group: Incorrect nominee');
         admin = nominatedAdmin;
