@@ -22,8 +22,8 @@ contract Group is BaseRelayRecipient {
         _;
     }
 
-    constructor() public {
-        admin = _msgSender();
+    constructor(address _eve) public { // need to change 
+        admin = _eve;
     }
 
     /**

@@ -18,8 +18,8 @@ describe('NFTFactory', () => {
     let managerGroup;
     let nftfactory;
     it('creates groups', async () => {
-        creatorGroup = await deployContract(creator, Group, []);
-        managerGroup = await deployContract(manager, Group, []);
+        creatorGroup = await deployContract(creator, Group, [creator.address]);
+        managerGroup = await deployContract(manager, Group, [manager.address]);
     });
 
     it('creates factory', async () => {
