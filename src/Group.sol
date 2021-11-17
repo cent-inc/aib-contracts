@@ -22,8 +22,8 @@ contract Group is BaseRelayRecipient {
         _;
     }
 
-    constructor() public {
-        admin = _msgSender();
+    constructor(address _admin) public {
+        admin = _admin;
     }
 
     /**
@@ -31,11 +31,11 @@ contract Group is BaseRelayRecipient {
      *
      * @param newMember address the address add
      */
-    function addMember(address newMember) public onlyAdmin {
+    function addMember(address newMember) external onlyAdmin {
         members.add(newMember);
     }
 
-    function removeMember(address existingMember) public onlyAdmin {
+    function removeMember(address existingMember) external onlyAdmin {
         members.remove(existingMember);
     }
 
@@ -44,34 +44,34 @@ contract Group is BaseRelayRecipient {
      *
      * @param newAdmin address the new admin to assign, which manages members
      */
-    function nominateAdmin(address newAdmin) public onlyAdmin {
+    function nominateAdmin(address newAdmin) external onlyAdmin {
         nominatedAdmin = newAdmin;
     }
 
     /**
      * @dev function accept admin nomination a new admin
      */
-    function acceptAdmin() public {
+    function acceptAdmin() external {
         require(nominatedAdmin != NULL_ADDRESS, 'Group: No nominee');
         require(nominatedAdmin == _msgSender(), 'Group: Incorrect nominee');
         admin = nominatedAdmin;
         nominatedAdmin = NULL_ADDRESS;
     }
 
-    function getMemberCount() public view returns (uint256) {
+    function getMemberCount() external view returns (uint256) {
         return members.length();
     }
 
-    function getMemberByIndex(uint256 index) public view returns (address) {
+    function getMemberByIndex(uint256 index) external view returns (address) {
         return members.at(index);
+    }
+
+    function isMember(address addr) external view returns (bool) {
+        return members.contains(addr) || getAdmin() == addr;
     }
 
     function getAdmin() public view returns (address) {
         return admin;
-    }
-
-    function isMember(address addr) public view returns (bool) {
-        return members.contains(addr) || getAdmin() == addr;
     }
 
     string public override versionRecipient = "1";
