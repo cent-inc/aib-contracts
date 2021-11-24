@@ -1,6 +1,5 @@
 import { expect, use } from 'chai';
 import { Contract, utils } from 'ethers';
-import { toBuffer, keccak256 } from 'ethereumjs-util';
 import {
     deployContract,
     MockProvider,
@@ -34,8 +33,8 @@ describe('NFTFactoryManager', () => {
 
     it('creates NFTFactory', async () => {
         const managerMessage = utils.defaultAbiCoder.encode([ "uint256", "address" ], [ appID, creator.address ]);
-        const managerMessageHash = keccak256(toBuffer(managerMessage));
-        const managerSignature = manager.signMessage(toBuffer(managerMessageHash));
+        const managerMessageHash = utils.keccak256(managerMessage);
+        const managerSignature = await manager.signMessage(utils.arrayify(managerMessageHash));
 
         const txn = await factoryManager.createFactory(appID, creator.address, managerSignature);
 
@@ -50,22 +49,22 @@ describe('NFTFactoryManager', () => {
         const recipientA = accounts[0];
         const balanceABefore = await nftFactory.balanceOf(recipientA.address);
 
-        const creatorMessage = utils.defaultAbiCoder.encode([ "string" ], [ tokenURI ]);
-        const creatorMessageHash = keccak256(toBuffer(creatorMessage));
-        const creatorSignature = creator.signMessage(toBuffer(creatorMessageHash));
+        const creatorMessagePrefix = "\x19Ethereum Signed Message:\n" + tokenURI.length;
+        const creatorSignature = await creator.signMessage(tokenURI);
 
         const managerMessage = utils.defaultAbiCoder.encode(
             [ "address", "uint256", "string" ],
             [ recipientA.address, tokenId, tokenURI ]
         );
-        const managerMessageHash = keccak256(toBuffer(managerMessage));
-        const managerSignature = manager.signMessage(toBuffer(managerMessageHash));
+        const managerMessageHash = utils.keccak256(managerMessage);
+        const managerSignature = await manager.signMessage(utils.arrayify(managerMessageHash));
 
-        await factoryManager.managedMintBatch(
+        await factoryManager.mintBatch(
             appID,
             [recipientA.address],
             [tokenId],
             [tokenURI],
+            [creatorMessagePrefix],
             [creatorSignature],
             [managerSignature]
         );

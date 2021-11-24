@@ -3,32 +3,78 @@
     {
       "inputs": [
         {
-          "internalType": "address[]",
-          "name": "tos",
-          "type": "address[]"
+          "internalType": "address",
+          "name": "from",
+          "type": "address"
         },
         {
-          "internalType": "uint256[]",
-          "name": "tokenIds",
-          "type": "uint256[]"
-        },
-        {
-          "internalType": "string[]",
-          "name": "tokenURIs",
-          "type": "string[]"
-        },
-        {
-          "internalType": "bytes[]",
-          "name": "creatorSignatures",
-          "type": "bytes[]"
-        },
-        {
-          "internalType": "bytes[]",
-          "name": "managerSignatures",
-          "type": "bytes[]"
+          "internalType": "uint256",
+          "name": "tokenID",
+          "type": "uint256"
         }
       ],
-      "name": "managedMintBatch",
+      "name": "managedBurn",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "to",
+          "type": "address"
+        },
+        {
+          "internalType": "uint256",
+          "name": "tokenID",
+          "type": "uint256"
+        },
+        {
+          "internalType": "string",
+          "name": "tokenURI",
+          "type": "string"
+        },
+        {
+          "internalType": "string",
+          "name": "creatorMessagePrefix",
+          "type": "string"
+        },
+        {
+          "internalType": "bytes",
+          "name": "creatorSignature",
+          "type": "bytes"
+        },
+        {
+          "internalType": "bytes",
+          "name": "managerSignature",
+          "type": "bytes"
+        }
+      ],
+      "name": "managedMint",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "from",
+          "type": "address"
+        },
+        {
+          "internalType": "address",
+          "name": "to",
+          "type": "address"
+        },
+        {
+          "internalType": "uint256",
+          "name": "tokenID",
+          "type": "uint256"
+        }
+      ],
+      "name": "managedTransfer",
       "outputs": [],
       "stateMutability": "nonpayable",
       "type": "function"

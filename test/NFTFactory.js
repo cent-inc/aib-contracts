@@ -1,6 +1,5 @@
 import { expect, use } from 'chai';
 import { Contract, utils } from 'ethers';
-import { toBuffer, keccak256 } from 'ethereumjs-util';
 import {
     deployContract,
     MockProvider,
@@ -16,7 +15,7 @@ describe('NFTFactory', () => {
     const [creator, manager, ...accounts] = new MockProvider().getWallets();
     let creatorGroup;
     let managerGroup;
-    let nftfactory;
+    let nftFactory;
 
     it('creates groups', async () => {
         creatorGroup = await deployContract(creator, Group, [ creator.address ]);
@@ -24,30 +23,31 @@ describe('NFTFactory', () => {
     });
 
     it('creates factory', async () => {
-        nftfactory = await deployContract(creator, NFTFactory, [creatorGroup.address, managerGroup.address]);
+        nftFactory = await deployContract(creator, NFTFactory, []);
+        await nftFactory.init(creatorGroup.address, managerGroup.address, creator.address);
     });
 
     it('mints - directly', async () => {
         const recipientA = accounts[0];
         const recipientB = accounts[1];
 
-        const balanceABefore = await nftfactory.balanceOf(recipientA.address);
-        const balanceBBefore = await nftfactory.balanceOf(recipientB.address);
+        const balanceABefore = await nftFactory.balanceOf(recipientA.address);
+        const balanceBBefore = await nftFactory.balanceOf(recipientB.address);
 
-        await nftfactory.connect(creator).mintBatch(
+        await nftFactory.connect(creator).mintBatch(
             [ recipientA.address, recipientB.address, recipientB.address ],
             [ 1, 2, 3 ],
             [ 'foo', 'bar', 'baz' ]
         );
 
-        const balanceA = await nftfactory.balanceOf(recipientA.address);
-        const balanceB = await nftfactory.balanceOf(recipientB.address);
+        const balanceA = await nftFactory.balanceOf(recipientA.address);
+        const balanceB = await nftFactory.balanceOf(recipientB.address);
         expect(balanceA.toNumber() - balanceABefore.toNumber()).to.equal(1);
         expect(balanceB.toNumber() - balanceBBefore.toNumber()).to.equal(2);
 
-        const tokenURI1 = await nftfactory.tokenURI(1);
-        const tokenURI2 = await nftfactory.tokenURI(2);
-        const tokenURI3 = await nftfactory.tokenURI(3);
+        const tokenURI1 = await nftFactory.tokenURI(1);
+        const tokenURI2 = await nftFactory.tokenURI(2);
+        const tokenURI3 = await nftFactory.tokenURI(3);
 
         expect(tokenURI1).to.equal('foo');
         expect(tokenURI2).to.equal('bar');
@@ -58,31 +58,31 @@ describe('NFTFactory', () => {
         const tokenURI = 'bat';
         const tokenId = 4;
         const recipientA = accounts[0];
-        const balanceABefore = await nftfactory.balanceOf(recipientA.address);
+        const balanceABefore = await nftFactory.balanceOf(recipientA.address);
 
-        const creatorMessage = utils.defaultAbiCoder.encode([ "string" ], [ tokenURI ]);
-        const creatorMessageHash = keccak256(toBuffer(creatorMessage));
-        const creatorSignature = creator.signMessage(toBuffer(creatorMessageHash));
+        const creatorMessagePrefix = "\x19Ethereum Signed Message:\n" + tokenURI.length;
+        const creatorSignature = await creator.signMessage(tokenURI);
 
         const managerMessage = utils.defaultAbiCoder.encode(
             [ "address", "uint256", "string" ],
             [ recipientA.address, tokenId, tokenURI ]
         );
-        const managerMessageHash = keccak256(toBuffer(managerMessage));
-        const managerSignature = manager.signMessage(toBuffer(managerMessageHash));
+        const managerMessageHash = utils.keccak256(managerMessage);
+        const managerSignature = await manager.signMessage(utils.arrayify(managerMessageHash));
 
-        await nftfactory.managedMintBatch(
-            [recipientA.address],
-            [tokenId],
-            [tokenURI],
-            [creatorSignature],
-            [managerSignature]
+        await nftFactory.managedMint(
+            recipientA.address,
+            tokenId,
+            tokenURI,
+            creatorMessagePrefix,
+            creatorSignature,
+            managerSignature
         );
 
-        const balanceA = await nftfactory.balanceOf(recipientA.address);
+        const balanceA = await nftFactory.balanceOf(recipientA.address);
         expect(balanceA.toNumber() - balanceABefore.toNumber()).equals(1);
 
-        const tokenURIResult = await nftfactory.tokenURI(tokenId);
+        const tokenURIResult = await nftFactory.tokenURI(tokenId);
         expect(tokenURIResult).equals(tokenURI);
     });
 });

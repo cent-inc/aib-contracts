@@ -14,11 +14,80 @@ contract NFTFactory is ERC721Burnable, BaseRelayRecipient {
 
     address public creatorGroup;
     address public managerGroup;
+    address public setupManager;
 
-    constructor(address _creatorGroup, address _managerGroup) public ERC721("NFTs", "NFT") {
+    bool private initialized;
+
+    constructor() public ERC721("NFTs", "NFT") { }
+
+    // Because we use a `CloneFactory`,
+    // we must move any logic into the `init` method if possible
+    // and override any other methods if not possible.
+    function name() public view override returns (string memory) { return "NFTs"; }
+    function symbol() public view override returns (string memory) { return "NFT"; }
+
+    // Yanked from Zeppelin 721 since we don't have a constructor
+    bytes4 private constant _INTERFACE_ID_ERC721 = 0x80ac58cd;
+    bytes4 private constant _INTERFACE_ID_ERC721_METADATA = 0x5b5e139f;
+    bytes4 private constant _INTERFACE_ID_ERC721_ENUMERABLE = 0x780e9d63;
+
+    function init(address _creatorGroup, address _managerGroup, address _setupManager) public {
+        require(initialized == false, "NFTFactory: Already initialized");
+
+        // register the supported interfaces to conform to ERC721 via ERC165
+        _registerInterface(_INTERFACE_ID_ERC721);
+        _registerInterface(_INTERFACE_ID_ERC721_METADATA);
+        _registerInterface(_INTERFACE_ID_ERC721_ENUMERABLE);
+
+        // hardcode the trusted forwarded for EIP2771 metatransactions
+        _setTrustedForwarder(0x86C80a8aa58e0A4fa09A69624c31Ab2a6CAD56b8);
+
+        // hardcode the management of this contract
         creatorGroup = _creatorGroup;
         managerGroup = _managerGroup;
-        _setTrustedForwarder(0x86C80a8aa58e0A4fa09A69624c31Ab2a6CAD56b8);
+        setupManager = _setupManager;
+
+        initialized = true;
+    }
+
+    function managedMint(
+        address to,
+        uint256 tokenID,
+        string memory tokenURI,
+        string memory creatorMessagePrefix,
+        bytes memory creatorSignature,
+        bytes memory managerSignature
+    ) external {
+        bytes32 creatorHash = keccak256(abi.encodePacked(creatorMessagePrefix, tokenURI));
+        bytes32 managerHash = ECDSA.toEthSignedMessageHash(keccak256(abi.encode(to, tokenID, tokenURI)));
+
+        address creator = ECDSA.recover(creatorHash, creatorSignature);
+        address manager = ECDSA.recover(managerHash, managerSignature);
+
+        require(Group(creatorGroup).isMember(creator), "NFTFactory: Invalid creator address");
+        require(Group(managerGroup).isMember(manager), "NFTFactory: Invalid manager address");
+
+        _mint(to, tokenID);
+        _setTokenURI(tokenID, tokenURI);
+    }
+
+    function managedTransfer(
+        address from,
+        address to,
+        uint256 tokenID
+    ) external {
+        require(_msgSender() == setupManager, "NFTFactory: Only factory maker can perform");
+        require(_isApprovedOrOwner(from, tokenID), "NFTFactory: Not owner");
+        _transfer(from, to, tokenID);
+    }
+
+    function managedBurn(
+        address from,
+        uint256 tokenID
+    ) external {
+        require(_msgSender() == setupManager, "NFTFactory: Only factory maker can perform");
+        require(_isApprovedOrOwner(from, tokenID), "NFTFactory: Not owner");
+        _burn(tokenID);
     }
 
     /**
@@ -40,35 +109,6 @@ contract NFTFactory is ERC721Burnable, BaseRelayRecipient {
             ERROR_INVALID_INPUTS
         );
         for (uint256 i = 0; i < tos.length; ++i) {
-            _mint(tos[i], tokenIDs[i]);
-            _setTokenURI(tokenIDs[i], tokenURIs[i]);
-        }
-    }
-
-    function managedMintBatch(
-        address[] memory tos,
-        uint256[] memory tokenIDs,
-        string[] memory tokenURIs,
-        bytes[] memory creatorSignatures,
-        bytes[] memory managerSignatures
-    ) external {
-        require(
-            tos.length == tokenIDs.length &&
-            tos.length == tokenURIs.length &&
-            tos.length == creatorSignatures.length &&
-            tos.length == managerSignatures.length,
-            ERROR_INVALID_INPUTS
-        );
-        for (uint256 i = 0; i < tos.length; ++i) {
-            bytes32 creatorHash = ECDSA.toEthSignedMessageHash(keccak256(abi.encode(tokenURIs[i])));
-            bytes32 managerHash = ECDSA.toEthSignedMessageHash(keccak256(abi.encode(tos[i], tokenIDs[i], tokenURIs[i])));
-
-            address creator = ECDSA.recover(creatorHash, creatorSignatures[i]);
-            address manager = ECDSA.recover(managerHash, managerSignatures[i]);
-
-            require(Group(creatorGroup).isMember(creator), "NFTFactory: Invalid creator address");
-            require(Group(managerGroup).isMember(manager), "NFTFactory: Invalid manager address");
-
             _mint(tos[i], tokenIDs[i]);
             _setTokenURI(tokenIDs[i], tokenURIs[i]);
         }
@@ -151,13 +191,6 @@ contract NFTFactory is ERC721Burnable, BaseRelayRecipient {
         return approvals;
     }
 
-    function isApprovedOrOwner(
-        address spender,
-        uint256 tokenId
-    ) external view returns (bool) {
-        return _isApprovedOrOwner(spender, tokenId);
-    }
-
     function existsBatch(
         uint256[] memory tokenIDs
     ) external view returns (bool[] memory) {
@@ -166,6 +199,13 @@ contract NFTFactory is ERC721Burnable, BaseRelayRecipient {
             exists[i] = _exists(tokenIDs[i]);
         }
         return exists;
+    }
+
+    function isApprovedOrOwner(
+        address spender,
+        uint256 tokenID
+    ) external view returns (bool) {
+        return _isApprovedOrOwner(spender, tokenID);
     }
 
     /* -- BEGIN IRelayRecipient overrides -- */

@@ -12,12 +12,24 @@ interface Deployer {
 }
 
 interface Factory {
-    function managedMintBatch(
-        address[] memory tos,
-        uint256[] memory tokenIds,
-        string[] memory tokenURIs,
-        bytes[] memory creatorSignatures,
-        bytes[] memory managerSignatures
+    function managedMint(
+        address to,
+        uint256 tokenID,
+        string memory tokenURI,
+        string memory creatorMessagePrefix,
+        bytes memory creatorSignature,
+        bytes memory managerSignature
+    ) external;
+
+    function managedTransfer(
+        address from,
+        address to,
+        uint256 tokenID
+    ) external;
+
+    function managedBurn(
+        address from,
+        uint256 tokenID
     ) external;
 }
 
@@ -34,7 +46,9 @@ contract NFTFactoryManager is BaseRelayRecipient {
     constructor(address manager, address deployer) public {
         managerGroup = new Group(manager);
         nftFactoryDeployer = Deployer(deployer);
+        _setTrustedForwarder(0x86C80a8aa58e0A4fa09A69624c31Ab2a6CAD56b8);
     }
+
     function createFactory(uint256 appID, address creator, bytes memory managerSignature) public {
         require(nftFactories[appID] == NULL_ADDRESS, "NFTFactoryManager: NFTFactory exists");
 
@@ -67,23 +81,55 @@ contract NFTFactoryManager is BaseRelayRecipient {
     }
 
     /**
-     * Convenience method to avoid needing to add contract to relayer
+     * Convenience methods to avoid needing to add contract to relayer
      */
-    function managedMintBatch(
+
+    function mintBatch(
         uint256 appID,
         address[] memory tos,
         uint256[] memory tokenIDs,
         string[] memory tokenURIs,
+        string[] memory creatorMessagePrefixes,
         bytes[] memory creatorSignatures,
         bytes[] memory managerSignatures
     ) external {
-        Factory(getNFTFactory(appID)).managedMintBatch(
-            tos,
-            tokenIDs,
-            tokenURIs,
-            creatorSignatures,
-            managerSignatures
-        );
+        Factory factory = Factory(getNFTFactory(appID));
+        for (uint256 i = 0; i < tos.length; ++i) {
+            factory.managedMint(
+                tos[i],
+                tokenIDs[i],
+                tokenURIs[i],
+                creatorMessagePrefixes[i],
+                creatorSignatures[i],
+                managerSignatures[i]
+            );
+        }
+    }
+
+    function transferBatch(
+        uint256[] memory appIDs,
+        address[] memory tos,
+        uint256[] memory tokenIDs
+    ) external {
+        for (uint256 i = 0; i < appIDs.length; ++i) {
+            Factory(getNFTFactory(appIDs[i])).managedTransfer(
+                _msgSender(),
+                tos[i],
+                tokenIDs[i]
+            );
+        }
+    }
+
+    function burnBatch(
+        uint256[] memory appIDs,
+        uint256[] memory tokenIDs
+    ) external {
+        for (uint256 i = 0; i < appIDs.length; ++i) {
+            Factory(getNFTFactory(appIDs[i])).managedBurn(
+                _msgSender(),
+                tokenIDs[i]
+            );
+        }
     }
 
     string public override versionRecipient = "1";
