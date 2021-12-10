@@ -21,6 +21,24 @@
     {
       "inputs": [
         {
+          "internalType": "string",
+          "name": "tokenURI",
+          "type": "string"
+        },
+        {
+          "internalType": "bytes",
+          "name": "managerSignature",
+          "type": "bytes"
+        }
+      ],
+      "name": "managedCap",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
           "internalType": "address",
           "name": "to",
           "type": "address"

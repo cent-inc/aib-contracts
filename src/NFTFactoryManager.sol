@@ -27,6 +27,11 @@ interface Factory {
         uint256 tokenID
     ) external;
 
+    function managedCap(
+        string memory tokenURI,
+        bytes memory managerSignature
+    ) external;
+
     function managedBurn(
         address from,
         uint256 tokenID
@@ -101,6 +106,19 @@ contract NFTFactoryManager is BaseRelayRecipient {
                 tokenURIs[i],
                 creatorMessagePrefixes[i],
                 creatorSignatures[i],
+                managerSignatures[i]
+            );
+        }
+    }
+
+    function capBatch(
+        uint256[] memory appIDs,
+        string[] memory tokenURIs,
+        bytes[] memory managerSignatures
+    ) external {
+        for (uint256 i = 0; i < appIDs.length; ++i) {
+            Factory(getNFTFactory(appIDs[i])).managedCap(
+                tokenURIs[i],
                 managerSignatures[i]
             );
         }

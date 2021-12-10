@@ -44,7 +44,7 @@ describe('NFTFactoryManager', () => {
     });
 
     it('mints through manager', async () => {
-        const tokenURI = 'bat';
+        const tokenURI = 'cap';
         const tokenId = 4;
         const recipientA = accounts[0];
         const balanceABefore = await nftFactory.balanceOf(recipientA.address);
@@ -74,5 +74,54 @@ describe('NFTFactoryManager', () => {
 
         const tokenURIResult = await nftFactory.tokenURI(tokenId);
         expect(tokenURIResult).equals(tokenURI);
+    });
+
+    it('caps mint', async () => {
+        const tokenURI = 'cap';
+        const tokenId = 5;
+
+        const capMessage = utils.defaultAbiCoder.encode(
+            [ "string" ],
+            [ tokenURI ]
+        );
+        const capMessageHash = utils.keccak256(capMessage);
+        const capSignature = await  manager.signMessage(utils.arrayify(capMessageHash));
+        await factoryManager.capBatch(
+            [appID],
+            [tokenURI],
+            [capSignature]
+        );
+
+
+        const recipientA = accounts[0];
+        const balanceABefore = await nftFactory.balanceOf(recipientA.address);
+
+        const creatorMessagePrefix = "\x19Ethereum Signed Message:\n" + tokenURI.length;
+        const creatorSignature = await creator.signMessage(tokenURI);
+
+        const managerMessage = utils.defaultAbiCoder.encode(
+            [ "address", "uint256", "string" ],
+            [ recipientA.address, tokenId, tokenURI ]
+        );
+        const managerMessageHash = utils.keccak256(managerMessage);
+        const managerSignature = await manager.signMessage(utils.arrayify(managerMessageHash));
+
+        try {
+            await factoryManager.mintBatch(
+                appID,
+                [recipientA.address],
+                [tokenId],
+                [tokenURI],
+                [creatorMessagePrefix],
+                [creatorSignature],
+                [managerSignature]
+            );
+        }
+        catch(e) {
+
+        }
+
+        const balanceA = await nftFactory.balanceOf(recipientA.address);
+        expect(balanceA.toNumber() - balanceABefore.toNumber()).equals(0);
     });
 });

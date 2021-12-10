@@ -30,13 +30,13 @@ describe('NFTFactory', () => {
     it('mints - directly', async () => {
         const recipientA = accounts[0];
         const recipientB = accounts[1];
+        const tokenIDs = ["1000000000000000001", "1000000000000000002", "1000000000000000003"];
 
         const balanceABefore = await nftFactory.balanceOf(recipientA.address);
         const balanceBBefore = await nftFactory.balanceOf(recipientB.address);
 
         await nftFactory.connect(creator).mintBatch(
             [ recipientA.address, recipientB.address, recipientB.address ],
-            [ 1, 2, 3 ],
             [ 'foo', 'bar', 'baz' ]
         );
 
@@ -45,9 +45,9 @@ describe('NFTFactory', () => {
         expect(balanceA.toNumber() - balanceABefore.toNumber()).to.equal(1);
         expect(balanceB.toNumber() - balanceBBefore.toNumber()).to.equal(2);
 
-        const tokenURI1 = await nftFactory.tokenURI(1);
-        const tokenURI2 = await nftFactory.tokenURI(2);
-        const tokenURI3 = await nftFactory.tokenURI(3);
+        const tokenURI1 = await nftFactory.tokenURI(tokenIDs[0]);
+        const tokenURI2 = await nftFactory.tokenURI(tokenIDs[1]);
+        const tokenURI3 = await nftFactory.tokenURI(tokenIDs[2]);
 
         expect(tokenURI1).to.equal('foo');
         expect(tokenURI2).to.equal('bar');

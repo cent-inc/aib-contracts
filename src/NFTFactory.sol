@@ -18,6 +18,11 @@ contract NFTFactory is ERC721Burnable, BaseRelayRecipient {
 
     bool private initialized;
 
+    mapping(string => bool) public managedMintCapped;
+
+    uint256 private constant directMintRangeStart = 1000000000000000001;
+    uint256 private directMintOffset = 0;
+
     constructor() public ERC721("NFTs", "NFT") { }
 
     // Because we use a `CloneFactory`,
@@ -58,6 +63,9 @@ contract NFTFactory is ERC721Burnable, BaseRelayRecipient {
         bytes memory creatorSignature,
         bytes memory managerSignature
     ) external {
+        require(managedMintCapped[tokenURI] == false, "NFTFactory: Minting capped");
+        require(tokenID < directMintRangeStart, "NFTFactory: Token ID out of range");
+
         bytes32 creatorHash = keccak256(abi.encodePacked(creatorMessagePrefix, tokenURI));
         bytes32 managerHash = ECDSA.toEthSignedMessageHash(keccak256(abi.encode(to, tokenID, tokenURI)));
 
@@ -69,6 +77,16 @@ contract NFTFactory is ERC721Burnable, BaseRelayRecipient {
 
         _mint(to, tokenID);
         _setTokenURI(tokenID, tokenURI);
+    }
+
+    function managedCap(
+        string memory tokenURI,
+        bytes memory managerSignature
+    ) external {
+        bytes32 managerHash = ECDSA.toEthSignedMessageHash(keccak256(abi.encode(tokenURI)));
+        address manager = ECDSA.recover(managerHash, managerSignature);
+        require(Group(managerGroup).isMember(manager), "NFTFactory: Invalid manager address");
+        managedMintCapped[tokenURI] = true;
     }
 
     function managedTransfer(
@@ -94,24 +112,23 @@ contract NFTFactory is ERC721Burnable, BaseRelayRecipient {
      * @dev creator mints directly to the contract
      *
      * @param tos address[] array of recipients to mint to
-     * @param tokenIDs uint256[] array of ids to key the tokens with
      * @param tokenURIs string[] array of metadata URIs for each token
      */
     function mintBatch(
         address[] memory tos,
-        uint256[] memory tokenIDs,
         string[] memory tokenURIs
     ) external {
         require(Group(creatorGroup).isMember(_msgSender()), "NFTFactory: Invalid creator address");
         require(
-            tos.length == tokenIDs.length &&
             tos.length == tokenURIs.length,
             ERROR_INVALID_INPUTS
         );
+        uint256 tokenID = directMintRangeStart + directMintOffset;
         for (uint256 i = 0; i < tos.length; ++i) {
-            _mint(tos[i], tokenIDs[i]);
-            _setTokenURI(tokenIDs[i], tokenURIs[i]);
+            _mint(tos[i], tokenID + i);
+            _setTokenURI(tokenID + i, tokenURIs[i]);
         }
+        directMintOffset += tos.length;
     }
 
     function burnBatch(
