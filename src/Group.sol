@@ -10,11 +10,12 @@ pragma solidity 0.6.12;
 contract Group is BaseRelayRecipient {
     using EnumerableSet for EnumerableSet.AddressSet;
 
+    address private constant NULL_ADDRESS = 0x0000000000000000000000000000000000000000;
     address private admin;
     address private nominatedAdmin;
     address[] private memberLog;
-    address private constant NULL_ADDRESS = 0x0000000000000000000000000000000000000000;
-    // mapping(address => bool) private members;
+    bool private initialized = false;
+
     EnumerableSet.AddressSet private members;
 
     modifier onlyAdmin {
@@ -22,8 +23,11 @@ contract Group is BaseRelayRecipient {
         _;
     }
 
-    constructor(address _admin) public {
-        admin = _admin;
+    function init(address initialAdmin) public {
+        require(initialized == false, "Group: Admin already set");
+        _setTrustedForwarder(0x86C80a8aa58e0A4fa09A69624c31Ab2a6CAD56b8);
+        admin = initialAdmin;
+        initialized = true;
     }
 
     /**

@@ -21,8 +21,14 @@ describe('NFTFactory', () => {
     let nftFactory;
 
     it('creates groups', async () => {
-        creatorGroup = await deployContract(creator, Group, [ creator.address ]);
-        managerGroup = await deployContract(manager, Group, [ manager.address ]);
+        creatorGroup = await deployContract(creator, Group, [ ]);
+        await creatorGroup.init(creator.address);
+        managerGroup = await deployContract(manager, Group, [ ]);
+        await managerGroup.init(manager.address);
+
+        // Can't init twice
+        await expect(managerGroup.init(manager.address)).to.be.reverted;
+
     });
 
     it('creates factory', async () => {

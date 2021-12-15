@@ -16,7 +16,8 @@ describe('Group', () => {
     const nullAddr = '0x0000000000000000000000000000000000000000';
 
     it('creates a group', async () => {
-        group = await deployContract(creator, Group, [ creator.address ]);
+        group = await deployContract(creator, Group, [ ]);
+        await group.init(creator.address);
     });
     it('recognizes admin', async () => {
         const admin = await group.getAdmin();

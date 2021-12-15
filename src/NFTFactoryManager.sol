@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 import 'openzeppelin-solidity/contracts/cryptography/ECDSA.sol';
 import './BaseRelayRecipient.sol';
+import './GroupDeployer.sol';
 import './Group.sol';
 
 pragma experimental ABIEncoderV2;
@@ -42,18 +43,20 @@ interface Factory {
 contract NFTFactoryManager is BaseRelayRecipient {
     string private constant ERROR_INVALID_INPUTS = "NFTFactoryManager: input length mismatch";
 
-    Group private managerGroup;
+    GroupDeployer private groupDeployer;
     Deployer private nftFactoryDeployer;
 
+    address private managerGroup;
     mapping(uint256 => address) private creatorGroups;
     mapping(uint256 => address) private nftFactories;
 
     address private constant NULL_ADDRESS = 0x0000000000000000000000000000000000000000;
 
     constructor(address manager, address deployer) public {
-        managerGroup = new Group(manager);
-        nftFactoryDeployer = Deployer(deployer);
         _setTrustedForwarder(0x86C80a8aa58e0A4fa09A69624c31Ab2a6CAD56b8);
+        groupDeployer = new GroupDeployer();
+        nftFactoryDeployer = Deployer(deployer);
+        managerGroup = groupDeployer.deploy(manager);
     }
 
     function createFactory(uint256 appID, address creator, bytes memory managerSignature) public {
@@ -61,11 +64,11 @@ contract NFTFactoryManager is BaseRelayRecipient {
 
         bytes32 managerHash = ECDSA.toEthSignedMessageHash(keccak256(abi.encode(appID, creator)));
         address manager = ECDSA.recover(managerHash, managerSignature);
-        require(managerGroup.isMember(manager), "NFTFactoryManager: Invalid manager address");
+        require(Group(managerGroup).isMember(manager), "NFTFactoryManager: Invalid manager address");
 
-        Group creatorGroup = new Group(creator);
+        address creatorGroup = groupDeployer.deploy(creator);
 
-        address nftFactory = nftFactoryDeployer.deploy(address(creatorGroup), address(managerGroup));
+        address nftFactory = nftFactoryDeployer.deploy(creatorGroup, managerGroup);
 
         nftFactories[appID] = nftFactory;
         creatorGroups[appID] = address(creatorGroup);
