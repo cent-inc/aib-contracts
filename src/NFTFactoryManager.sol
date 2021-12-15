@@ -71,11 +71,11 @@ contract NFTFactoryManager is BaseRelayRecipient {
         address nftFactory = nftFactoryDeployer.deploy(creatorGroup, managerGroup);
 
         nftFactories[appID] = nftFactory;
-        creatorGroups[appID] = address(creatorGroup);
+        creatorGroups[appID] = creatorGroup;
     }
 
     function getManagerGroup() public view returns (address) {
-        return address(managerGroup);
+        return managerGroup;
     }
 
     function getCreatorGroup(uint256 appID) public view returns (address) {
