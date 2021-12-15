@@ -12,4 +12,6 @@
 
 1. Deploy the `NFTFactoryDeployer`
 
-2. Deploy the `NFTFactoryManager(manager, deployer)` with the managing group member used in the aib-backend and the deployer just deployed
+2. Deploy the `NFTFactoryManager(coldwallet, deployer)` with the group admin used in the aib-backend and the deployer just deployed
+
+3. Call `NFTFactoryManager.getManagerGroup()`, initialize the `Group`, and add member used by backend

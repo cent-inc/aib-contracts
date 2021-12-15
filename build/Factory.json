@@ -49,6 +49,11 @@
           "type": "uint256"
         },
         {
+          "internalType": "uint256",
+          "name": "tokenRoyalty",
+          "type": "uint256"
+        },
+        {
           "internalType": "string",
           "name": "tokenURI",
           "type": "string"

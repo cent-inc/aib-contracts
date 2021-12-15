@@ -2,15 +2,20 @@
 // https://github.com/OpenZeppelin/openzeppelin-contracts/commit/8e0296096449d9b1cd7c5631e917330635244c37
 import 'openzeppelin-solidity/contracts/token/ERC721/ERC721Burnable.sol';
 import 'openzeppelin-solidity/contracts/cryptography/ECDSA.sol';
+import './IERC2981.sol';
 import './BaseRelayRecipient.sol';
 import './Group.sol';
 
 pragma experimental ABIEncoderV2;
-pragma solidity >=0.4.22 <0.9.0;
+pragma solidity 0.6.12;
 
-contract NFTFactory is ERC721Burnable, BaseRelayRecipient {
+contract NFTFactory is ERC721Burnable, BaseRelayRecipient, IERC2981 {
 
     string private constant ERROR_INVALID_INPUTS = "NFTFactory: input length mismatch";
+
+    mapping(uint256 => uint256) private royaltyAmounts;
+    uint256 public constant MAX_ROYALTY = 10000; // 100%
+    address public royaltyReceiver;
 
     address public creatorGroup;
     address public managerGroup;
@@ -35,6 +40,7 @@ contract NFTFactory is ERC721Burnable, BaseRelayRecipient {
     bytes4 private constant _INTERFACE_ID_ERC721 = 0x80ac58cd;
     bytes4 private constant _INTERFACE_ID_ERC721_METADATA = 0x5b5e139f;
     bytes4 private constant _INTERFACE_ID_ERC721_ENUMERABLE = 0x780e9d63;
+    bytes4 private constant _INTERFACE_ID_ERC2981 = 0x2a55205a;
 
     function init(address _creatorGroup, address _managerGroup, address _setupManager) public {
         require(initialized == false, "NFTFactory: Already initialized");
@@ -43,9 +49,12 @@ contract NFTFactory is ERC721Burnable, BaseRelayRecipient {
         _registerInterface(_INTERFACE_ID_ERC721);
         _registerInterface(_INTERFACE_ID_ERC721_METADATA);
         _registerInterface(_INTERFACE_ID_ERC721_ENUMERABLE);
+        _registerInterface(_INTERFACE_ID_ERC2981);
 
         // hardcode the trusted forwarded for EIP2771 metatransactions
         _setTrustedForwarder(0x86C80a8aa58e0A4fa09A69624c31Ab2a6CAD56b8);
+
+        royaltyReceiver = Group(_creatorGroup).getAdmin();
 
         // hardcode the management of this contract
         creatorGroup = _creatorGroup;
@@ -55,19 +64,21 @@ contract NFTFactory is ERC721Burnable, BaseRelayRecipient {
         initialized = true;
     }
 
+    // Mintanager from minting more a tokenURI
     function managedMint(
         address to,
         uint256 tokenID,
+        uint256 tokenRoyalty,
         string memory tokenURI,
         string memory creatorMessagePrefix,
         bytes memory creatorSignature,
         bytes memory managerSignature
     ) external {
-        require(managedMintCapped[tokenURI] == false, "NFTFactory: Minting capped");
+        require(managedMintCapped[tokenURI] == false, "NFTFactory: Managed mint capped");
         require(tokenID < directMintRangeStart, "NFTFactory: Token ID out of range");
 
         bytes32 creatorHash = keccak256(abi.encodePacked(creatorMessagePrefix, tokenURI));
-        bytes32 managerHash = ECDSA.toEthSignedMessageHash(keccak256(abi.encode(to, tokenID, tokenURI)));
+        bytes32 managerHash = ECDSA.toEthSignedMessageHash(keccak256(abi.encode(to, tokenID, tokenRoyalty, tokenURI)));
 
         address creator = ECDSA.recover(creatorHash, creatorSignature);
         address manager = ECDSA.recover(managerHash, managerSignature);
@@ -76,9 +87,11 @@ contract NFTFactory is ERC721Burnable, BaseRelayRecipient {
         require(Group(managerGroup).isMember(manager), "NFTFactory: Invalid manager address");
 
         _mint(to, tokenID);
+        _setTokenRoyalty(tokenID, tokenRoyalty);
         _setTokenURI(tokenID, tokenURI);
     }
 
+    // Prevent the group manager from minting more a tokenURI
     function managedCap(
         string memory tokenURI,
         bytes memory managerSignature
@@ -89,6 +102,8 @@ contract NFTFactory is ERC721Burnable, BaseRelayRecipient {
         managedMintCapped[tokenURI] = true;
     }
 
+    // Convenience method for easy transfers via NFTFactoryManager
+    // Factory Manager must pass _msgSender() in `from` param
     function managedTransfer(
         address from,
         address to,
@@ -99,6 +114,8 @@ contract NFTFactory is ERC721Burnable, BaseRelayRecipient {
         _transfer(from, to, tokenID);
     }
 
+    // Convenience method for easy burns via NFTFactoryManager
+    // NFTFactoryManager must pass _msgSender() in `from` param
     function managedBurn(
         address from,
         uint256 tokenID
@@ -112,21 +129,28 @@ contract NFTFactory is ERC721Burnable, BaseRelayRecipient {
      * @dev creator mints directly to the contract
      *
      * @param tos address[] array of recipients to mint to
+     * @param tokenRoyalties uint256[] array of royalty percentages, 0-10000. 2.5% is 250.
      * @param tokenURIs string[] array of metadata URIs for each token
      */
     function mintBatch(
         address[] memory tos,
+        uint256[] memory tokenRoyalties,
         string[] memory tokenURIs
     ) external {
         require(Group(creatorGroup).isMember(_msgSender()), "NFTFactory: Invalid creator address");
         require(
+            tos.length == tokenRoyalties.length &&
             tos.length == tokenURIs.length,
             ERROR_INVALID_INPUTS
         );
-        uint256 tokenID = directMintRangeStart + directMintOffset;
+
+        uint256 tokenIDBase = directMintRangeStart + directMintOffset;
+
         for (uint256 i = 0; i < tos.length; ++i) {
-            _mint(tos[i], tokenID + i);
-            _setTokenURI(tokenID + i, tokenURIs[i]);
+            uint256 tokenID = tokenIDBase + i;
+            _mint(tos[i], tokenID);
+            _setTokenRoyalty(tokenID, tokenRoyalties[i]);
+            _setTokenURI(tokenID, tokenURIs[i]);
         }
         directMintOffset += tos.length;
     }
@@ -224,6 +248,29 @@ contract NFTFactory is ERC721Burnable, BaseRelayRecipient {
     ) external view returns (bool) {
         return _isApprovedOrOwner(spender, tokenID);
     }
+
+
+    /* -- BEGIN ERC2981 supporting methods */
+    function royaltyInfo(
+        uint256 tokenID,
+        uint256 salePrice
+    ) external view override returns (address receiver, uint256 royaltyAmount) {
+        receiver = royaltyReceiver;
+        royaltyAmount = salePrice * royaltyAmounts[tokenID] / MAX_ROYALTY;
+        return (receiver, royaltyAmount);
+    }
+
+    function changeRoyaltyReceiver(address newReceiver) external {
+        require(Group(creatorGroup).isMember(_msgSender()), "NFTFactory: Not authorized to change royalty receiver");
+        royaltyReceiver = newReceiver;
+    }
+
+    function _setTokenRoyalty(uint256 tokenID, uint256 tokenRoyalty) internal {
+        require(tokenRoyalty <= MAX_ROYALTY, "NFTFactory: Royalty exceeds 100% (represented as 10000).");
+        royaltyAmounts[tokenID] = tokenRoyalty;
+    }
+    /* -- END ERC2981 supporting methods */
+
 
     /* -- BEGIN IRelayRecipient overrides -- */
     function _msgSender() internal override(Context, BaseRelayRecipient) view returns (address payable) {

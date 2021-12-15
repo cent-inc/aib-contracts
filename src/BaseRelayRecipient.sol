@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 import './IRelayRecipient.sol';
 
-pragma solidity >=0.4.22 <0.9.0;
+pragma solidity 0.6.12;
 
 // Source:
 // https://github.com/opengsn/gsn/blob/995647ebf8e34ac183d5b99c06c385bc1995d6dd/packages/contracts/src/BaseRelayRecipient.sol

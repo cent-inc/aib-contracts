@@ -15,6 +15,7 @@ interface Factory {
     function managedMint(
         address to,
         uint256 tokenID,
+        uint256 tokenRoyalty,
         string memory tokenURI,
         string memory creatorMessagePrefix,
         bytes memory creatorSignature,
@@ -39,6 +40,7 @@ interface Factory {
 }
 
 contract NFTFactoryManager is BaseRelayRecipient {
+    string private constant ERROR_INVALID_INPUTS = "NFTFactoryManager: input length mismatch";
 
     Group private managerGroup;
     Deployer private nftFactoryDeployer;
@@ -90,19 +92,30 @@ contract NFTFactoryManager is BaseRelayRecipient {
      */
 
     function mintBatch(
-        uint256 appID,
+        uint256[] memory appIDs,
         address[] memory tos,
         uint256[] memory tokenIDs,
+        uint256[] memory tokenRoyalties,
         string[] memory tokenURIs,
         string[] memory creatorMessagePrefixes,
         bytes[] memory creatorSignatures,
         bytes[] memory managerSignatures
     ) external {
-        Factory factory = Factory(getNFTFactory(appID));
+        require (
+            appIDs.length == tos.length &&
+            appIDs.length == tokenIDs.length &&
+            appIDs.length == tokenRoyalties.length &&
+            appIDs.length == tokenURIs.length &&
+            appIDs.length == creatorMessagePrefixes.length &&
+            appIDs.length == creatorSignatures.length &&
+            appIDs.length == managerSignatures.length,
+            ERROR_INVALID_INPUTS
+        );
         for (uint256 i = 0; i < tos.length; ++i) {
-            factory.managedMint(
+            Factory(getNFTFactory(appIDs[i])).managedMint(
                 tos[i],
                 tokenIDs[i],
+                tokenRoyalties[i],
                 tokenURIs[i],
                 creatorMessagePrefixes[i],
                 creatorSignatures[i],
@@ -116,6 +129,11 @@ contract NFTFactoryManager is BaseRelayRecipient {
         string[] memory tokenURIs,
         bytes[] memory managerSignatures
     ) external {
+        require (
+            appIDs.length == tokenURIs.length &&
+            appIDs.length == managerSignatures.length,
+            ERROR_INVALID_INPUTS
+        );
         for (uint256 i = 0; i < appIDs.length; ++i) {
             Factory(getNFTFactory(appIDs[i])).managedCap(
                 tokenURIs[i],
@@ -129,6 +147,11 @@ contract NFTFactoryManager is BaseRelayRecipient {
         address[] memory tos,
         uint256[] memory tokenIDs
     ) external {
+        require (
+            appIDs.length == tos.length &&
+            appIDs.length == tokenIDs.length,
+            ERROR_INVALID_INPUTS
+        );
         for (uint256 i = 0; i < appIDs.length; ++i) {
             Factory(getNFTFactory(appIDs[i])).managedTransfer(
                 _msgSender(),
@@ -142,6 +165,10 @@ contract NFTFactoryManager is BaseRelayRecipient {
         uint256[] memory appIDs,
         uint256[] memory tokenIDs
     ) external {
+        require (
+            appIDs.length == tokenIDs.length,
+            ERROR_INVALID_INPUTS
+        );
         for (uint256 i = 0; i < appIDs.length; ++i) {
             Factory(getNFTFactory(appIDs[i])).managedBurn(
                 _msgSender(),

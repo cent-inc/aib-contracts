@@ -74,5 +74,9 @@ contract Group is BaseRelayRecipient {
         return admin;
     }
 
+    function getNominee() public view returns (address) {
+        return nominatedAdmin;
+    }
+
     string public override versionRecipient = "1";
 }
