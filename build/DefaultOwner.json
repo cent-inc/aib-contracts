@@ -1,27 +1,16 @@
 {
   "abi": [
     {
-      "inputs": [
-        {
-          "internalType": "address",
-          "name": "creatorGroup",
-          "type": "address"
-        },
-        {
-          "internalType": "address",
-          "name": "managerGroup",
-          "type": "address"
-        }
-      ],
-      "name": "deploy",
+      "inputs": [],
+      "name": "getDefaultOwner",
       "outputs": [
         {
           "internalType": "address",
-          "name": "",
+          "name": "owner",
           "type": "address"
         }
       ],
-      "stateMutability": "nonpayable",
+      "stateMutability": "view",
       "type": "function"
     }
   ],

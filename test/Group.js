@@ -6,7 +6,8 @@ import {
     solidity
 } from 'ethereum-waffle';
 
-import Group from '../build/Group.json';
+import fs from 'fs';
+const Group = JSON.parse(fs.readFileSync('./build/Group.json'));
 
 use(solidity);
 
@@ -17,7 +18,6 @@ describe('Group', () => {
 
     it('creates a group', async () => {
         group = await deployContract(creator, Group, [ ]);
-        await group.init(creator.address);
     });
     it('recognizes admin', async () => {
         const admin = await group.getAdmin();

@@ -13,21 +13,8 @@ pragma solidity 0.6.12;
  */
 abstract contract BaseRelayRecipient is IRelayRecipient {
 
-    /*
-     * Forwarder singleton we accept calls from
-     */
-    address private _trustedForwarder;
-
-    function trustedForwarder() public virtual view returns (address){
-        return _trustedForwarder;
-    }
-
-    function _setTrustedForwarder(address _forwarder) internal {
-        _trustedForwarder = _forwarder;
-    }
-
-    function isTrustedForwarder(address forwarder) public override view returns(bool) {
-        return forwarder == _trustedForwarder;
+    function isTrustedForwarder(address forwarder) public override pure returns(bool) {
+        return forwarder == 0x86C80a8aa58e0A4fa09A69624c31Ab2a6CAD56b8;
     }
 
     /**

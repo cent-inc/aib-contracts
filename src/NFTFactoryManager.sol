@@ -1,162 +1,169 @@
 // SPDX-License-Identifier: MIT
 import 'openzeppelin-solidity/contracts/cryptography/ECDSA.sol';
+import './CloneFactory.sol';
+import './NFTFactory.sol';
+import './DefaultOwner.sol';
 import './BaseRelayRecipient.sol';
-import './GroupDeployer.sol';
 import './Group.sol';
 
 pragma experimental ABIEncoderV2;
 
 pragma solidity 0.6.12;
 
-interface Deployer {
-    function deploy(address creatorGroup, address managerGroup) external returns (address);
-}
+contract NFTFactoryManager is BaseRelayRecipient, Group, CloneFactory, DefaultOwner {
+    string public override versionRecipient = "1";
 
-interface Factory {
-    function managedMint(
-        address to,
-        uint256 tokenID,
-        uint256 tokenRoyalty,
-        string memory tokenURI,
-        string memory creatorMessagePrefix,
-        bytes memory creatorSignature,
-        bytes memory managerSignature
-    ) external;
-
-    function managedTransfer(
-        address from,
-        address to,
-        uint256 tokenID
-    ) external;
-
-    function managedCap(
-        string memory tokenURI,
-        bytes memory managerSignature
-    ) external;
-
-    function managedBurn(
-        address from,
-        uint256 tokenID
-    ) external;
-}
-
-contract NFTFactoryManager is BaseRelayRecipient {
     string private constant ERROR_INVALID_INPUTS = "NFTFactoryManager: input length mismatch";
 
-    GroupDeployer private groupDeployer;
-    Deployer private nftFactoryDeployer;
+    address private baseFactory;
+    address public defaultOwner;
 
-    address private managerGroup;
-    mapping(uint256 => address) private creatorGroups;
-    mapping(uint256 => address) private nftFactories;
+    mapping(string => address) private factoryAddresses;
+    mapping(string => address) private factoryOwners;
 
-    address private constant NULL_ADDRESS = 0x0000000000000000000000000000000000000000;
-
-    constructor(address manager, address deployer) public {
-        _setTrustedForwarder(0x86C80a8aa58e0A4fa09A69624c31Ab2a6CAD56b8);
-        groupDeployer = new GroupDeployer();
-        nftFactoryDeployer = Deployer(deployer);
-        managerGroup = groupDeployer.deploy(manager);
+    constructor(
+        address _defaultOwner
+    ) public {
+        defaultOwner = _defaultOwner;
+        baseFactory = address(new NFTFactory());
     }
 
-    function createFactory(uint256 appID, address creator, bytes memory managerSignature) public {
-        require(nftFactories[appID] == NULL_ADDRESS, "NFTFactoryManager: NFTFactory exists");
+    function createFactory(
+        string memory contractURI,
+        address creatorAddress,
+        address royaltyAddress,
+        uint256 royaltyRate,
+        string memory tokenName,
+        string memory tokenSymbol,
+        bytes memory managerSignature
+    ) external {
+        bytes32 managerHash = ECDSA.toEthSignedMessageHash(keccak256(abi.encode(
+            contractURI,
+            creatorAddress,
+            royaltyAddress,
+            royaltyRate,
+            tokenName,
+            tokenSymbol
+        )));
+        address signer = ECDSA.recover(managerHash, managerSignature);
+        require(isMember(signer), "NFTFactoryManager: Invalid manager address");
 
-        bytes32 managerHash = ECDSA.toEthSignedMessageHash(keccak256(abi.encode(appID, creator)));
-        address manager = ECDSA.recover(managerHash, managerSignature);
-        require(Group(managerGroup).isMember(manager), "NFTFactoryManager: Invalid manager address");
-
-        address creatorGroup = groupDeployer.deploy(creator);
-
-        address nftFactory = nftFactoryDeployer.deploy(creatorGroup, managerGroup);
-
-        nftFactories[appID] = nftFactory;
-        creatorGroups[appID] = creatorGroup;
-    }
-
-    function getManagerGroup() public view returns (address) {
-        return managerGroup;
-    }
-
-    function getCreatorGroup(uint256 appID) public view returns (address) {
-        address creatorGroup = creatorGroups[appID];
-        require(creatorGroup != NULL_ADDRESS, "NFTFactoryManager: Group not found");
-        return creatorGroup;
-    }
-
-    function getNFTFactory(uint256 appID) public view returns (address) {
-        address nftFactory = nftFactories[appID];
-        require(nftFactory != NULL_ADDRESS, "NFTFactoryManager: NFTFactory not found");
-        return nftFactory;
+        _createFactory(
+            contractURI,
+            creatorAddress,
+            royaltyAddress,
+            royaltyRate,
+            tokenName,
+            tokenSymbol
+        );
     }
 
     /**
      * Convenience methods to avoid needing to add contract to relayer
      */
-
     function mintBatch(
-        uint256[] memory appIDs,
+        string[] memory contractURIs,
+        address[] memory creatorAddresses,
+        address[] memory royaltyAddresses,
+        uint256[] memory royaltyRates,
+        string[] memory tokenNames,
+        string[] memory tokenSymbols,
         address[] memory tos,
         uint256[] memory tokenIDs,
-        uint256[] memory tokenRoyalties,
         string[] memory tokenURIs,
-        string[] memory creatorMessagePrefixes,
         bytes[] memory creatorSignatures,
         bytes[] memory managerSignatures
     ) external {
-        require (
-            appIDs.length == tos.length &&
-            appIDs.length == tokenIDs.length &&
-            appIDs.length == tokenRoyalties.length &&
-            appIDs.length == tokenURIs.length &&
-            appIDs.length == creatorMessagePrefixes.length &&
-            appIDs.length == creatorSignatures.length &&
-            appIDs.length == managerSignatures.length,
-            ERROR_INVALID_INPUTS
-        );
         for (uint256 i = 0; i < tos.length; ++i) {
-            Factory(getNFTFactory(appIDs[i])).managedMint(
+            bytes32 managerHash = ECDSA.toEthSignedMessageHash(keccak256(abi.encode(
+                contractURIs[i],
+                creatorAddresses[i],
+                royaltyAddresses[i],
+                royaltyRates[i],
+                tokenNames[i],
+                tokenSymbols[i],
                 tos[i],
                 tokenIDs[i],
-                tokenRoyalties[i],
+                tokenURIs[i]
+            )));
+            address signer = ECDSA.recover(managerHash, managerSignatures[i]);
+            require(isMember(signer), "NFTFactoryManager: Invalid manager address");
+
+            address factoryAddress = _getFactoryAddress(contractURIs[i]);
+            if (factoryAddress == address(0)) {
+                factoryAddress = _createFactory(
+                    contractURIs[i],
+                    creatorAddresses[i],
+                    royaltyAddresses[i],
+                    royaltyRates[i],
+                    tokenNames[i],
+                    tokenSymbols[i]
+                );
+            }
+
+            NFTFactory(factoryAddress).managedMint(
+                tos[i],
+                tokenIDs[i],
                 tokenURIs[i],
-                creatorMessagePrefixes[i],
-                creatorSignatures[i],
-                managerSignatures[i]
+                creatorSignatures[i]
             );
         }
     }
 
+    function _createFactory(
+        string memory contractURI,
+        address creatorAddress,
+        address royaltyAddress,
+        uint256 royaltyRate,
+        string memory tokenName,
+        string memory tokenSymbol
+    ) internal returns (address) {
+        address factoryAddress = createClone(baseFactory);
+        NFTFactory(factoryAddress).init(
+            creatorAddress,
+            royaltyAddress,
+            royaltyRate,
+            tokenName,
+            tokenSymbol,
+            contractURI
+        );
+        _setFactoryAddress(contractURI, factoryAddress);
+        return factoryAddress;
+    }
+
+
     function capBatch(
-        uint256[] memory appIDs,
+        string[] memory contractURIs,
         string[] memory tokenURIs,
         bytes[] memory managerSignatures
     ) external {
         require (
-            appIDs.length == tokenURIs.length &&
-            appIDs.length == managerSignatures.length,
+            contractURIs.length == tokenURIs.length &&
+            contractURIs.length == managerSignatures.length,
             ERROR_INVALID_INPUTS
         );
-        for (uint256 i = 0; i < appIDs.length; ++i) {
-            Factory(getNFTFactory(appIDs[i])).managedCap(
-                tokenURIs[i],
-                managerSignatures[i]
+        for (uint256 i = 0; i < contractURIs.length; ++i) {
+            bytes32 managerHash = ECDSA.toEthSignedMessageHash(keccak256(abi.encode(contractURIs[i], tokenURIs[i])));
+            address manager = ECDSA.recover(managerHash, managerSignatures[i]);
+            require(isMember(manager), "NFTFactory: Invalid manager address");
+            NFTFactory(getFactoryAddress(contractURIs[i])).managedCap(
+                tokenURIs[i]
             );
         }
     }
 
     function transferBatch(
-        uint256[] memory appIDs,
+        string[] memory contractURIs,
         address[] memory tos,
         uint256[] memory tokenIDs
     ) external {
         require (
-            appIDs.length == tos.length &&
-            appIDs.length == tokenIDs.length,
+            contractURIs.length == tos.length &&
+            contractURIs.length == tokenIDs.length,
             ERROR_INVALID_INPUTS
         );
-        for (uint256 i = 0; i < appIDs.length; ++i) {
-            Factory(getNFTFactory(appIDs[i])).managedTransfer(
+        for (uint256 i = 0; i < contractURIs.length; ++i) {
+            NFTFactory(getFactoryAddress(contractURIs[i])).managedTransfer(
                 _msgSender(),
                 tos[i],
                 tokenIDs[i]
@@ -165,20 +172,107 @@ contract NFTFactoryManager is BaseRelayRecipient {
     }
 
     function burnBatch(
-        uint256[] memory appIDs,
+        string[] memory contractURIs,
         uint256[] memory tokenIDs
     ) external {
         require (
-            appIDs.length == tokenIDs.length,
+            contractURIs.length == tokenIDs.length,
             ERROR_INVALID_INPUTS
         );
-        for (uint256 i = 0; i < appIDs.length; ++i) {
-            Factory(getNFTFactory(appIDs[i])).managedBurn(
+        for (uint256 i = 0; i < contractURIs.length; ++i) {
+            NFTFactory(getFactoryAddress(contractURIs[i])).managedBurn(
                 _msgSender(),
                 tokenIDs[i]
             );
         }
     }
 
-    string public override versionRecipient = "1";
+    function existsBatch(
+        string[] memory contractURIs,
+        uint256[] memory tokenIDs
+    ) external view returns (bool[] memory) {
+        require (
+            contractURIs.length == tokenIDs.length,
+            ERROR_INVALID_INPUTS
+        );
+        bool[] memory exists = new bool[](contractURIs.length);
+        for (uint256 i = 0; i < contractURIs.length; ++i) {
+            address factoryAddress = getFactoryAddress(contractURIs[i]);
+            if (factoryAddress != address(0)) {
+                exists[i] = NFTFactory(factoryAddress).exists(tokenIDs[i]);
+            }
+        }
+        return exists;
+    }
+
+    function isApprovedOrOwnerBatch(
+        string[] memory contractURIs,
+        uint256[] memory tokenIDs,
+        address[] memory spenders
+    ) external view returns (bool[] memory) {
+        require(
+            contractURIs.length == tokenIDs.length &&
+            contractURIs.length == spenders.length,
+            ERROR_INVALID_INPUTS
+        );
+        bool[] memory approvedOrOwner = new bool[](contractURIs.length);
+        for (uint256 i = 0; i < contractURIs.length; ++i) {
+            address factoryAddress = getFactoryAddress(contractURIs[i]);
+            if (factoryAddress != address(0)) {
+                approvedOrOwner[i] = NFTFactory(factoryAddress).isApprovedOrOwner(spenders[i], tokenIDs[i]);
+            }
+        }
+        return approvedOrOwner;
+    }
+
+    function getFactoryAddress(
+        string memory contractURI
+    ) public view returns (address) {
+        address nftFactory = _getFactoryAddress(contractURI);
+        require(nftFactory != address(0), "NFTFactoryManager: NFTFactory not found");
+        return nftFactory;
+    }
+
+    function getFactoryAddresses(
+        string[] memory contractURIs
+    ) external view returns (address[] memory) {
+        address[] memory nftFactories = new address[](contractURIs.length);
+        for (uint256 i = 0; i < contractURIs.length; i++) {
+            nftFactories[i] = _getFactoryAddress(contractURIs[i]);
+        }
+        return nftFactories;
+    }
+
+    function getDefaultOwner(
+    ) external override view returns (address) {
+        return defaultOwner;
+    }
+
+    function setDefaultOwner(
+        address newDefaultOwner
+    ) external onlyAdmin {
+        require(newDefaultOwner != address(0), "NFTFactoryManager: Invalid Owner Address");
+        defaultOwner = newDefaultOwner;
+    }
+
+    function _getFactoryAddress(
+        string memory contractURI
+    ) internal view returns (address) {
+        return factoryAddresses[contractURI];
+    }
+
+    function _setFactoryAddress(
+        string memory contractURI,
+        address contractAddress
+    ) internal {
+        require(factoryAddresses[contractURI] == address(0), "NFTFactoryManager: Factory Set");
+        factoryAddresses[contractURI] = contractAddress;
+    }
+
+    /* -- IRelayRecipient override -- */
+    function _msgSender(
+    ) internal override(Context, BaseRelayRecipient) view returns (address payable) {
+        return BaseRelayRecipient._msgSender();
+    }
+
 }

@@ -16,20 +16,7 @@
           "type": "bool"
         }
       ],
-      "stateMutability": "view",
-      "type": "function"
-    },
-    {
-      "inputs": [],
-      "name": "trustedForwarder",
-      "outputs": [
-        {
-          "internalType": "address",
-          "name": "",
-          "type": "address"
-        }
-      ],
-      "stateMutability": "view",
+      "stateMutability": "pure",
       "type": "function"
     },
     {

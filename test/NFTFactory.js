@@ -6,8 +6,8 @@ import {
     solidity
 } from 'ethereum-waffle';
 
-import NFTFactory from '../build/NFTFactory.json';
-import Group from '../build/Group.json';
+import fs from 'fs';
+const NFTFactory = JSON.parse(fs.readFileSync('./build/NFTFactory.json'));
 
 use(solidity);
 
@@ -15,123 +15,91 @@ describe('NFTFactory', () => {
     const tokenRoyalty = 1000; // 10%
     const maxRoyalty = 10000; // 100%
     const directTokenIDs = ["1000000000000000001", "1000000000000000002", "1000000000000000003"];
-    const [creator, manager, ...accounts] = new MockProvider().getWallets();
-    let creatorGroup;
-    let managerGroup;
+    const directTokenURIs = ["foo", "bar", "bar"];
+    const contractURI = "contractURI";
+    const [creator, manager, recipientA, recipientB, ...accounts] = new MockProvider().getWallets();
     let nftFactory;
 
-    it('creates groups', async () => {
-        creatorGroup = await deployContract(creator, Group, [ ]);
-        await creatorGroup.init(creator.address);
-        managerGroup = await deployContract(manager, Group, [ ]);
-        await managerGroup.init(manager.address);
-
-        // Can't init twice
-        await expect(managerGroup.init(manager.address)).to.be.reverted;
-
-    });
-
     it('creates factory', async () => {
-        nftFactory = await deployContract(creator, NFTFactory, []);
-        await nftFactory.init(creatorGroup.address, managerGroup.address, creator.address);
+        nftFactory = await deployContract(manager, NFTFactory, []);
+        await nftFactory.connect(manager).init(
+            creator.address,
+            creator.address,
+            tokenRoyalty,
+            "Tests",
+            "TEST",
+            "contractURI"
+        );
     });
 
-    it('mints - directly', async () => {
-        const recipientA = accounts[0];
-        const recipientB = accounts[1];
-
+    it('mints three tokens, two with same uri', async () => {
         const balanceABefore = await nftFactory.balanceOf(recipientA.address);
         const balanceBBefore = await nftFactory.balanceOf(recipientB.address);
 
-        await nftFactory.connect(creator).mintBatch(
-            [ recipientA.address, recipientB.address, recipientB.address ],
-            [ tokenRoyalty, tokenRoyalty * 2, tokenRoyalty * 3 ],
-            [ 'foo', 'bar', 'baz' ]
-        );
+        const creatorSignatureA = await creator.signMessage("Collection: " + contractURI + "\n\nToken: " + directTokenURIs[0]);
+        const creatorSignatureB = await creator.signMessage("Collection: " + contractURI + "\n\nToken: " + directTokenURIs[1]);
+        const creatorSignatureC = await creator.signMessage("Collection: " + contractURI + "\n\nToken: " + directTokenURIs[2]);
+
+        await nftFactory.connect(manager).managedMint(recipientA.address, directTokenIDs[0], directTokenURIs[0], creatorSignatureA);
+        await nftFactory.connect(manager).managedMint(recipientA.address, directTokenIDs[1], directTokenURIs[1], creatorSignatureB);
+        await nftFactory.connect(manager).managedMint(recipientB.address, directTokenIDs[2], directTokenURIs[2], creatorSignatureC);
 
         const balanceA = await nftFactory.balanceOf(recipientA.address);
-        const balanceB = await nftFactory.balanceOf(recipientB.address);
-        expect(balanceA.toNumber() - balanceABefore.toNumber()).to.equal(1);
-        expect(balanceB.toNumber() - balanceBBefore.toNumber()).to.equal(2);
+        expect(balanceA.toNumber() - balanceABefore.toNumber()).equals(2);
 
-        await nftFactory.connect(recipientB).approve(recipientA.address, directTokenIDs[1]);
-        const isApprovedOrOwners = await nftFactory.isApprovedOrOwnerBatch(
-            [recipientA.address, recipientB.address, recipientA.address, recipientB.address],
-            [directTokenIDs[0], directTokenIDs[0], directTokenIDs[1], directTokenIDs[1]]
-        );
-        expect(isApprovedOrOwners[0]).to.equal(true);
-        expect(isApprovedOrOwners[1]).to.equal(false);
-        expect(isApprovedOrOwners[2]).to.equal(true);
-        expect(isApprovedOrOwners[3]).to.equal(true);
+        const balanceB = await nftFactory.balanceOf(recipientB.address);
+        expect(balanceB.toNumber() - balanceBBefore.toNumber()).to.equal(1);
+
     });
+
+    it('returns proper approvals for tokens', async () => {
+        await nftFactory.connect(recipientB).approve(recipientA.address, directTokenIDs[2]);
+
+        const approvalA0 = await nftFactory.isApprovedOrOwner(recipientA.address, directTokenIDs[0]);
+        const approvalB0 = await nftFactory.isApprovedOrOwner(recipientB.address, directTokenIDs[0]);
+        const approvalA2 = await nftFactory.isApprovedOrOwner(recipientA.address, directTokenIDs[2]);
+        const approvalB2 = await nftFactory.isApprovedOrOwner(recipientB.address, directTokenIDs[2]);
+        expect(approvalA0).to.equal(true);
+        expect(approvalB0).to.equal(false);
+        expect(approvalA2).to.equal(true);
+        expect(approvalB2).to.equal(true);
+    })
 
     it('returns the correct uris', async () => {
         const tokenURI1 = await nftFactory.tokenURI(directTokenIDs[0]);
         const tokenURI2 = await nftFactory.tokenURI(directTokenIDs[1]);
         const tokenURI3 = await nftFactory.tokenURI(directTokenIDs[2]);
 
-        expect(tokenURI1).to.equal('foo');
-        expect(tokenURI2).to.equal('bar');
-        expect(tokenURI3).to.equal('baz');
+        expect(tokenURI1).to.equal(directTokenURIs[0]);
+        expect(tokenURI2).to.equal(directTokenURIs[1]);
+        expect(tokenURI3).to.equal(directTokenURIs[2]);
     });
 
     it('reports on whether tokens exist', async () => {
-        const exists = await nftFactory.existsBatch(directTokenIDs.concat(12345));
-        expect(exists[0]).to.equal(true);
-        expect(exists[1]).to.equal(true);
-        expect(exists[2]).to.equal(true);
-        expect(exists[3]).to.equal(false);
+        const exists0 = await nftFactory.exists(directTokenIDs[0]);
+        const exists1 = await nftFactory.exists(directTokenIDs[1]);
+        const exists2 = await nftFactory.exists(directTokenIDs[2]);
+        const exists3 = await nftFactory.exists(1);
+        expect(exists0).to.equal(true);
+        expect(exists1).to.equal(true);
+        expect(exists2).to.equal(true);
+        expect(exists3).to.equal(false);
     });
 
-    it('reports amounts and receivers and updates', async () => {
+    it('reports correct initial and transferred royalty amounts and receivers', async () => {
         const recipientA = accounts[0];
-        const recipientB = accounts[1];
         const price = 1000;
         const [receiverA, royaltyA] = await nftFactory.royaltyInfo(directTokenIDs[0], price);
-
-        await expect(nftFactory.connect(recipientA).changeRoyaltyReceiver(recipientA.address)).to.be.reverted;
-
-        const [receiverB, royaltyB] = await nftFactory.royaltyInfo(directTokenIDs[1], price);
-        await nftFactory.changeRoyaltyReceiver(recipientA.address);
-        const [receiverC, royaltyC] = await nftFactory.royaltyInfo(directTokenIDs[2], price);
         expect(receiverA).to.equal(creator.address);
-        expect(receiverB).to.equal(creator.address);
-        expect(receiverC).to.equal(recipientA.address);
         expect(royaltyA.toNumber()).to.equal(price * tokenRoyalty / maxRoyalty);
-        expect(royaltyB.toNumber()).to.equal(price * 2 * tokenRoyalty / maxRoyalty);
-        expect(royaltyC.toNumber()).to.equal(price * 3 * tokenRoyalty / maxRoyalty);
+
+        await expect(nftFactory.connect(creator).transferRoyalties(recipientA.address)).to.be.reverted;
+        await nftFactory.connect(manager).transferOwnership(creator.address);
+        await nftFactory.connect(creator).transferRoyalties(recipientA.address);
+        const [newReceiverA, newRoyaltyA] = await nftFactory.royaltyInfo(directTokenIDs[0], price);
+        expect(newReceiverA).to.equal(recipientA.address);
+        expect(royaltyA.toNumber()).to.equal(price * tokenRoyalty / maxRoyalty);
+
     });
 
-    it('mints - managed', async () => {
-        const tokenURI = 'bat';
-        const tokenID = 4;
-        const recipientA = accounts[0];
-        const balanceABefore = await nftFactory.balanceOf(recipientA.address);
-
-        const creatorMessagePrefix = "\x19Ethereum Signed Message:\n" + tokenURI.length;
-        const creatorSignature = await creator.signMessage(tokenURI);
-
-        const managerMessage = utils.defaultAbiCoder.encode(
-            [ "address", "uint256", "uint256", "string" ],
-            [ recipientA.address, tokenID, tokenRoyalty, tokenURI ]
-        );
-        const managerMessageHash = utils.keccak256(managerMessage);
-        const managerSignature = await manager.signMessage(utils.arrayify(managerMessageHash));
-
-        await nftFactory.managedMint(
-            recipientA.address,
-            tokenID,
-            tokenRoyalty,
-            tokenURI,
-            creatorMessagePrefix,
-            creatorSignature,
-            managerSignature
-        );
-
-        const balanceA = await nftFactory.balanceOf(recipientA.address);
-        expect(balanceA.toNumber() - balanceABefore.toNumber()).equals(1);
-
-        const tokenURIResult = await nftFactory.tokenURI(tokenID);
-        expect(tokenURIResult).equals(tokenURI);
-    });
 });

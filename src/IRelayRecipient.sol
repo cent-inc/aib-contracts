@@ -12,7 +12,7 @@ abstract contract IRelayRecipient {
      * the forwarder is required to verify the sender's signature, and verify
      * the call is not a replay.
      */
-    function isTrustedForwarder(address forwarder) public virtual view returns(bool);
+    function isTrustedForwarder(address forwarder) public virtual pure returns(bool);
 
     /**
      * return the sender of this call.

@@ -17,6 +17,7 @@
     "flatten": "npm run build flatten",
     "test": "export NODE_ENV=test && ./node_modules/mocha/bin/mocha --require esm"
   },
+  "type": "module",
   "author": "",
   "license": "MIT"
 }

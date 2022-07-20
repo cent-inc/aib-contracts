@@ -1,105 +1,119 @@
 // SPDX-License-Identifier: MIT
-// https://github.com/OpenZeppelin/openzeppelin-contracts/commit/8e0296096449d9b1cd7c5631e917330635244c37
 import 'openzeppelin-solidity/contracts/token/ERC721/ERC721Burnable.sol';
 import 'openzeppelin-solidity/contracts/cryptography/ECDSA.sol';
+import 'openzeppelin-solidity/contracts/utils/Strings.sol';
 import './IERC2981.sol';
+import './DefaultOwner.sol';
 import './BaseRelayRecipient.sol';
-import './Group.sol';
 
-pragma experimental ABIEncoderV2;
 pragma solidity 0.6.12;
 
 contract NFTFactory is ERC721Burnable, BaseRelayRecipient, IERC2981 {
+    string public constant override versionRecipient = "1"; // For IRelayRecipient
 
-    string private constant ERROR_INVALID_INPUTS = "NFTFactory: input length mismatch";
+    string private constant COLLECTION_PREFIX = "Collection: ";
+    string private constant TOKEN_PREFIX = "\n\nToken: ";
+    uint256 private constant MAX_ROYALTY = 10000; // 100%
 
-    mapping(uint256 => uint256) private royaltyAmounts;
-    uint256 public constant MAX_ROYALTY = 10000; // 100%
+    address private manager;
+    address private contractOwner;
+    address public creator;
+    uint256 public royaltyRate;
     address public royaltyReceiver;
+    string private tokenName;
+    string private tokenSymbol;
+    string public contractURI;
+    enum MINT_STATE { NONE, ACTIVE, ENDED }
 
-    address public creatorGroup;
-    address public managerGroup;
-    address public setupManager;
+    mapping(uint256 => bytes32) private tokenIDToTypeID;
+    mapping(bytes32 => TokenType) tokenTypes;
 
-    bool private initialized;
-
-    mapping(string => bool) public managedMintCapped;
-
-    uint256 private constant directMintRangeStart = 1000000000000000001;
-    uint256 private directMintOffset = 0;
-
-    constructor() public ERC721("NFTs", "NFT") { }
-
-    // Because we use a `CloneFactory`,
-    // we must move any logic into the `init` method if possible
-    // and override any other methods if not possible.
-    function name() public view override returns (string memory) { return "NFTs"; }
-    function symbol() public view override returns (string memory) { return "NFT"; }
-
-    // Yanked from Zeppelin 721 since we don't have a constructor
-    bytes4 private constant _INTERFACE_ID_ERC721 = 0x80ac58cd;
-    bytes4 private constant _INTERFACE_ID_ERC721_METADATA = 0x5b5e139f;
-    bytes4 private constant _INTERFACE_ID_ERC721_ENUMERABLE = 0x780e9d63;
-    bytes4 private constant _INTERFACE_ID_ERC2981 = 0x2a55205a;
-
-    function init(address _creatorGroup, address _managerGroup, address _setupManager) public {
-        require(initialized == false, "NFTFactory: Already initialized");
-
-        // register the supported interfaces to conform to ERC721 via ERC165
-        _registerInterface(_INTERFACE_ID_ERC721);
-        _registerInterface(_INTERFACE_ID_ERC721_METADATA);
-        _registerInterface(_INTERFACE_ID_ERC721_ENUMERABLE);
-        _registerInterface(_INTERFACE_ID_ERC2981);
-
-        // hardcode the trusted forwarded for EIP2771 metatransactions
-        _setTrustedForwarder(0x86C80a8aa58e0A4fa09A69624c31Ab2a6CAD56b8);
-
-        royaltyReceiver = Group(_creatorGroup).getAdmin();
-
-        // hardcode the management of this contract
-        creatorGroup = _creatorGroup;
-        managerGroup = _managerGroup;
-        setupManager = _setupManager;
-
-        initialized = true;
+    struct TokenType {
+        MINT_STATE state;
+        string uri;
     }
 
-    // Mintanager from minting more a tokenURI
+    event OwnershipTransferred(
+        address indexed previousOwner,
+        address indexed newOwner
+    );
+
+    event RoyaltiesTransferred(
+        address indexed previousRoyaltyReceiver,
+        address indexed newRoyaltyReceiver
+    );
+
+    modifier onlyManager {
+      require(_msgSender() == manager, "NFTFactory: Only Manager");
+      _;
+    }
+
+    constructor() public ERC721("","") {
+        contractOwner = _msgSender();
+    }
+
+    // Because we use a `CloneFactory` we move any constructor logic into an `init` method
+    function init(
+        address _creator,
+        address _royaltyReceiver,
+        uint256 _royaltyRate,
+        string memory _tokenName,
+        string memory _tokenSymbol,
+        string memory _contractURI
+    ) public {
+        require(manager == address(0), "NFTFactory: Already Initialized");
+        manager = _msgSender();
+        creator = _creator;
+        royaltyRate = _royaltyRate;
+        royaltyReceiver = _royaltyReceiver;
+        tokenName = _tokenName;
+        tokenSymbol = _tokenSymbol;
+        contractURI = _contractURI;
+    }
+
+    // Managed mint of a tokenURI
     function managedMint(
         address to,
         uint256 tokenID,
-        uint256 tokenRoyalty,
         string memory tokenURI,
-        string memory creatorMessagePrefix,
-        bytes memory creatorSignature,
-        bytes memory managerSignature
-    ) external {
-        require(managedMintCapped[tokenURI] == false, "NFTFactory: Managed mint capped");
-        require(tokenID < directMintRangeStart, "NFTFactory: Token ID out of range");
+        bytes memory creatorSignature
+    ) public {
+        bytes32 typeID = _getTypeID(tokenURI);
 
-        bytes32 creatorHash = keccak256(abi.encodePacked(creatorMessagePrefix, tokenURI));
-        bytes32 managerHash = ECDSA.toEthSignedMessageHash(keccak256(abi.encode(to, tokenID, tokenRoyalty, tokenURI)));
+        MINT_STATE currentState = tokenTypes[typeID].state;
 
-        address creator = ECDSA.recover(creatorHash, creatorSignature);
-        address manager = ECDSA.recover(managerHash, managerSignature);
+        if (currentState == MINT_STATE.NONE) {
+            // Create a new token type
+            string memory collectionURI = contractURI;
+            uint256 creatorMessageLength = bytes(COLLECTION_PREFIX).length
+            + bytes(collectionURI).length
+            + bytes(TOKEN_PREFIX).length
+            + bytes(tokenURI).length;
 
-        require(Group(creatorGroup).isMember(creator), "NFTFactory: Invalid creator address");
-        require(Group(managerGroup).isMember(manager), "NFTFactory: Invalid manager address");
+            bytes32 creatorMessageHash = keccak256(abi.encodePacked(
+                "\x19Ethereum Signed Message:\n",
+                Strings.toString(creatorMessageLength),
+                COLLECTION_PREFIX,
+                collectionURI,
+                TOKEN_PREFIX,
+                tokenURI
+            ));
+            require(ECDSA.recover(creatorMessageHash, creatorSignature) == creator, "NFTFactory: Invalid signature");
+            _initTokenType(typeID, tokenURI);
+        }
+        else if (currentState == MINT_STATE.ENDED) {
+            revert("NFTFactory: Minting ended");
+        }
 
+        _setTokenType(tokenID, typeID);
         _mint(to, tokenID);
-        _setTokenRoyalty(tokenID, tokenRoyalty);
-        _setTokenURI(tokenID, tokenURI);
     }
 
-    // Prevent the group manager from minting more a tokenURI
+    // End managed minting of token if the supply cap is not hit
     function managedCap(
-        string memory tokenURI,
-        bytes memory managerSignature
-    ) external {
-        bytes32 managerHash = ECDSA.toEthSignedMessageHash(keccak256(abi.encode(tokenURI)));
-        address manager = ECDSA.recover(managerHash, managerSignature);
-        require(Group(managerGroup).isMember(manager), "NFTFactory: Invalid manager address");
-        managedMintCapped[tokenURI] = true;
+        string memory tokenURI
+    ) external onlyManager {
+        tokenTypes[_getTypeID(tokenURI)].state = MINT_STATE.ENDED;
     }
 
     // Convenience method for easy transfers via NFTFactoryManager
@@ -108,8 +122,7 @@ contract NFTFactory is ERC721Burnable, BaseRelayRecipient, IERC2981 {
         address from,
         address to,
         uint256 tokenID
-    ) external {
-        require(_msgSender() == setupManager, "NFTFactory: Only factory maker can perform");
+    ) external onlyManager {
         require(_isApprovedOrOwner(from, tokenID), "NFTFactory: Not owner");
         _transfer(from, to, tokenID);
     }
@@ -119,127 +132,42 @@ contract NFTFactory is ERC721Burnable, BaseRelayRecipient, IERC2981 {
     function managedBurn(
         address from,
         uint256 tokenID
-    ) external {
-        require(_msgSender() == setupManager, "NFTFactory: Only factory maker can perform");
+    ) external onlyManager {
         require(_isApprovedOrOwner(from, tokenID), "NFTFactory: Not owner");
         _burn(tokenID);
     }
 
-    /**
-     * @dev creator mints directly to the contract
-     *
-     * @param tos address[] array of recipients to mint to
-     * @param tokenRoyalties uint256[] array of royalty percentages, 0-10000. 2.5% is 250.
-     * @param tokenURIs string[] array of metadata URIs for each token
-     */
-    function mintBatch(
-        address[] memory tos,
-        uint256[] memory tokenRoyalties,
-        string[] memory tokenURIs
-    ) external {
-        require(Group(creatorGroup).isMember(_msgSender()), "NFTFactory: Invalid creator address");
-        require(
-            tos.length == tokenRoyalties.length &&
-            tos.length == tokenURIs.length,
-            ERROR_INVALID_INPUTS
-        );
-
-        uint256 tokenIDBase = directMintRangeStart + directMintOffset;
-
-        for (uint256 i = 0; i < tos.length; ++i) {
-            uint256 tokenID = tokenIDBase + i;
-            _mint(tos[i], tokenID);
-            _setTokenRoyalty(tokenID, tokenRoyalties[i]);
-            _setTokenURI(tokenID, tokenURIs[i]);
-        }
-        directMintOffset += tos.length;
+    function _getTypeID(
+        string memory uri
+    ) internal pure returns (bytes32) {
+        return keccak256(abi.encode(uri));
     }
 
-    function burnBatch(
-        uint256[] memory tokenIDs
-    ) external {
-        for (uint256 i = 0; i < tokenIDs.length; ++i) {
-            burn(tokenIDs[i]);
-        }
+    function _setTokenType(
+        uint256 tokenID,
+        bytes32 typeID
+    ) internal {
+        tokenIDToTypeID[tokenID] = typeID;
     }
 
-    function approveBatch(
-        address[] memory tos,
-        uint256[] memory tokenIDs
-    ) external {
-        require(tos.length == tokenIDs.length, ERROR_INVALID_INPUTS);
-        for (uint256 i = 0; i < tos.length; ++i) {
-            approve(tos[i], tokenIDs[i]);
-        }
+    function _getTokenType(
+        uint256 tokenID
+    ) internal view returns (bytes32) {
+        return tokenIDToTypeID[tokenID];
     }
 
-    function transferFromBatch(
-        address[] memory froms,
-        address[] memory tos,
-        uint256[] memory tokenIDs
-    ) external {
-        require(
-            froms.length == tos.length &&
-            froms.length == tokenIDs.length,
-            ERROR_INVALID_INPUTS
-        );
-        for (uint256 i = 0; i < froms.length; ++i) {
-            transferFrom(froms[i], tos[i], tokenIDs[i]);
-        }
+    function _initTokenType(
+        bytes32 typeID,
+        string memory uri
+    ) internal {
+        tokenTypes[typeID].state = MINT_STATE.ACTIVE;
+        tokenTypes[typeID].uri = uri;
     }
 
-    function safeTransferFromBatch(
-        address[] memory froms,
-        address[] memory tos,
-        uint256[] memory tokenIDs
-    ) external {
-        require(
-            froms.length == tos.length &&
-            froms.length == tokenIDs.length,
-            ERROR_INVALID_INPUTS
-        );
-        for (uint256 i = 0; i < froms.length; ++i) {
-            safeTransferFrom(froms[i], tos[i], tokenIDs[i], "");
-        }
-    }
-
-    function safeTransferFromWithDataBatch(
-        address[] memory froms,
-        address[] memory tos,
-        uint256[] memory tokenIDs,
-        bytes[] memory datas
-    ) external {
-        require(
-            froms.length == tos.length &&
-            froms.length == tokenIDs.length &&
-            froms.length == datas.length,
-            ERROR_INVALID_INPUTS
-        );
-        for (uint256 i = 0; i < froms.length; ++i) {
-            safeTransferFrom(froms[i], tos[i], tokenIDs[i], datas[i]);
-        }
-    }
-
-    function isApprovedOrOwnerBatch(
-        address[] memory spenders,
-        uint256[] memory tokenIDs
-    ) external view returns (bool[] memory) {
-        require(spenders.length == tokenIDs.length, ERROR_INVALID_INPUTS);
-        bool[] memory approvals = new bool[](spenders.length);
-        for (uint256 i = 0; i < spenders.length; ++i) {
-            approvals[i] = _isApprovedOrOwner(spenders[i], tokenIDs[i]);
-        }
-        return approvals;
-    }
-
-    function existsBatch(
-        uint256[] memory tokenIDs
-    ) external view returns (bool[] memory) {
-        bool[] memory exists = new bool[](tokenIDs.length);
-        for (uint256 i = 0; i < tokenIDs.length; ++i) {
-            exists[i] = _exists(tokenIDs[i]);
-        }
-        return exists;
+    function exists(
+        uint256 tokenID
+    ) external view returns (bool) {
+        return _exists(tokenID);
     }
 
     function isApprovedOrOwner(
@@ -249,34 +177,76 @@ contract NFTFactory is ERC721Burnable, BaseRelayRecipient, IERC2981 {
         return _isApprovedOrOwner(spender, tokenID);
     }
 
+    function tokenURI(
+        uint256 tokenID
+    ) public virtual view override returns (string memory) {
+        require(_exists(tokenID), "NFTFactory: Token not found");
+        return tokenTypes[_getTokenType(tokenID)].uri;
+    }
 
-    /* -- BEGIN ERC2981 supporting methods */
+    function name(
+    ) public view override returns (string memory) {
+        return tokenName;
+    }
+
+    function symbol(
+    ) public view override returns (string memory) {
+        return tokenSymbol;
+    }
+
+    /* -- ERC2981 support */
     function royaltyInfo(
         uint256 tokenID,
         uint256 salePrice
     ) external view override returns (address receiver, uint256 royaltyAmount) {
+        require(_exists(tokenID), "NFTFactory: Token not found");
         receiver = royaltyReceiver;
-        royaltyAmount = salePrice * royaltyAmounts[tokenID] / MAX_ROYALTY;
+        royaltyAmount = salePrice * royaltyRate / MAX_ROYALTY;
         return (receiver, royaltyAmount);
     }
 
-    function changeRoyaltyReceiver(address newReceiver) external {
-        require(Group(creatorGroup).isMember(_msgSender()), "NFTFactory: Not authorized to change royalty receiver");
-        royaltyReceiver = newReceiver;
-    }
-
-    function _setTokenRoyalty(uint256 tokenID, uint256 tokenRoyalty) internal {
-        require(tokenRoyalty <= MAX_ROYALTY, "NFTFactory: Royalty exceeds 100% (represented as 10000).");
-        royaltyAmounts[tokenID] = tokenRoyalty;
-    }
-    /* -- END ERC2981 supporting methods */
-
-
-    /* -- BEGIN IRelayRecipient overrides -- */
-    function _msgSender() internal override(Context, BaseRelayRecipient) view returns (address payable) {
+    /* -- IRelayRecipient override -- */
+    function _msgSender(
+    ) internal override(Context, BaseRelayRecipient) view returns (address payable) {
         return BaseRelayRecipient._msgSender();
     }
 
-    string public override versionRecipient = "1";
-    /* -- END IRelayRecipient overrides -- */
+    /* -- `Ownable` support -- */
+    function owner(
+    ) public view returns (address) {
+        address currentOwner = contractOwner;
+        if (currentOwner == address(0)) {
+            return DefaultOwner(manager).getDefaultOwner();
+        }
+        return currentOwner;
+    }
+
+    function transferOwnership(
+        address newOwner
+    ) public {
+        address currentOwner = owner();
+        require(_msgSender() == currentOwner, "NFTFactory: not owner");
+        require(newOwner != address(0), "NFTFactory: new owner is the zero address");
+        emit OwnershipTransferred(currentOwner, newOwner);
+        contractOwner = newOwner;
+    }
+    function transferRoyalties(
+        address newRoyaltyReceiver
+    ) public {
+        require(_msgSender() == owner(), "NFTFactory: not owner");
+        require(newRoyaltyReceiver != address(0), "NFTFactory: new owner is the zero address");
+        emit RoyaltiesTransferred(royaltyReceiver, newRoyaltyReceiver);
+        royaltyReceiver = newRoyaltyReceiver;
+    }
+
+    /* -- ERC-165 Support -- */
+    function supportsInterface(
+        bytes4 interfaceID
+    ) public view override(ERC165, IERC165) returns (bool) {
+        return interfaceID == 0x80ac58cd //_INTERFACE_ID_ERC721
+        || interfaceID == 0x5b5e139f //_INTERFACE_ID_ERC721_METADATA
+        || interfaceID == 0x780e9d63 //_INTERFACE_ID_ERC721_ENUMERABLE
+        || interfaceID == 0x2a55205a; //_INTERFACE_ID_ERC2981
+    }
+
 }
