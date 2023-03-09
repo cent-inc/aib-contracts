@@ -20,8 +20,6 @@ contract CollectionManager is BaseRelayRecipient, Group, CloneFactory, MetadataM
     mapping(string => address) private collectionAddresses;
     mapping(address => CollectionMetadata) private collectionMetadata;
     uint256 private constant MAX_ROYALTY = 10000; // 100%
-    uint256 private constant MAX_CAP = 1000000000; // 1B
-    uint256 private constant NO_CAP = 0;
 
     constructor() public {
         baseCollection = address(new Collection());
@@ -29,69 +27,67 @@ contract CollectionManager is BaseRelayRecipient, Group, CloneFactory, MetadataM
 
     struct CollectionMetadata {
         uint256 royalty;
-        uint256 supplyCap;
         address contractOwner;
         string contractURI;
-        string tokenURI;
         string name;
         string symbol;
         bool mintEnded;
     }
 
     function mintBatch(
-        string[] memory contractURIs,
-        address[] memory contractOwners,
-        uint256[] memory contractRoyalties,
-        string[] memory contractNames,
-        string[] memory contractSymbols,
-        uint256[] memory contractSupplyCaps,
-        bytes[] memory contractSignatures,
-        string[] memory tokenURIs,
+        string memory contractURI,
+        address contractOwner,
+        uint256 contractRoyalty,
+        string memory contractName,
+        string memory contractSymbol,
+        bytes memory contractSignature,
+        string memory tokenURI,
+        uint64 tokenSupplyCap,
         uint256[] memory tokenIDs,
         address[] memory tokenRecipients,
-        bytes[] memory tokenSignatures
+        bytes memory tokenSignature
     ) external {
-        for (uint256 i = 0; i < contractURIs.length; ++i) {
-            address collectionAddress = _getCollectionAddress(contractURIs[i]);
-            if (collectionAddress == address(0)) {
-                collectionAddress = _createCollection(
-                    contractURIs[i],
-                    contractRoyalties[i],
-                    contractSupplyCaps[i],
-                    contractOwners[i],
-                    contractNames[i],
-                    contractSymbols[i]
-                );
-                bytes32 contractMsgHash = ECDSA.toEthSignedMessageHash(keccak256(abi.encode(
-                    contractURIs[i],
-                    contractOwners[i],
-                    contractRoyalties[i],
-                    contractNames[i],
-                    contractSymbols[i],
-                    contractSupplyCaps[i]
-                )));
-                address contractCreator = ECDSA.recover(contractMsgHash, contractSignatures[i]);
-                require(isMember(contractCreator), "CollectionManager: Invalid manager address");
-                require(contractRoyalties[i] < MAX_ROYALTY, "CollectionManager: Invalid royalty");
-                require(contractSupplyCaps[i] < MAX_CAP, "CollectionManager: Invalid supply cap");
-            }
-            bytes32 tokenMsgHash = ECDSA.toEthSignedMessageHash(keccak256(abi.encode(
-                contractURIs[i],
-                tokenURIs[i],
-                tokenIDs[i],
-                tokenRecipients[i]
+        address collectionAddress = _getCollectionAddress(contractURI);
+        if (collectionAddress == address(0)) {
+            bytes32 contractMsgHash = ECDSA.toEthSignedMessageHash(keccak256(abi.encode(
+                contractURI,
+                contractOwner,
+                contractRoyalty,
+                contractName,
+                contractSymbol
             )));
-            address tokenCreator = ECDSA.recover(tokenMsgHash, tokenSignatures[i]);
-            require(isMember(tokenCreator), "CollectionManager: Invalid manager address");
+            address contractCreator = ECDSA.recover(contractMsgHash, contractSignature);
+            require(isMember(contractCreator), "CollectionManager: Invalid manager address");
 
-            uint256 newSupply = Collection(collectionAddress).mint(tokenRecipients[i], tokenIDs[i]);
-            uint256 supplyCap = collectionMetadata[collectionAddress].supplyCap;
-            bool mintEnded = collectionMetadata[collectionAddress].mintEnded;
-            require(
-                !mintEnded && (newSupply <= supplyCap || supplyCap == NO_CAP),
-                "Unable to mint additional tokens"
+            require(contractRoyalty <= MAX_ROYALTY, "CollectionManager: Invalid royalty");
+
+            collectionAddress = _createCollection(
+                contractURI,
+                contractOwner,
+                contractRoyalty,
+                contractName,
+                contractSymbol
             );
         }
+
+        bytes32 tokenMsgHash = ECDSA.toEthSignedMessageHash(keccak256(abi.encode(
+            contractURI,
+            tokenURI,
+            tokenSupplyCap,
+            tokenIDs,
+            tokenRecipients
+        )));
+        address tokenCreator = ECDSA.recover(tokenMsgHash, tokenSignature);
+        require(isMember(tokenCreator), "CollectionManager: Invalid manager address");
+
+        require(!collectionMetadata[collectionAddress].mintEnded, "Minting ended");
+
+        Collection(collectionAddress).mintBatch(
+            tokenURI,
+            tokenSupplyCap,
+            tokenRecipients,
+            tokenIDs
+        );
     }
 
     function capBatch(
@@ -209,9 +205,8 @@ contract CollectionManager is BaseRelayRecipient, Group, CloneFactory, MetadataM
 
     function _createCollection(
         string memory contractURI,
-        uint256 contractRoyalty,
-        uint256 contractSupplyCap,
         address contractOwner,
+        uint256 contractRoyalty,
         string memory contractName,
         string memory contractSymbol
     ) internal returns (address) {
@@ -221,7 +216,6 @@ contract CollectionManager is BaseRelayRecipient, Group, CloneFactory, MetadataM
         collectionAddresses[contractURI] = collectionAddress;
         CollectionMetadata storage metadata = collectionMetadata[collectionAddress];
         metadata.royalty = contractRoyalty;
-        metadata.supplyCap = contractSupplyCap;
         metadata.contractOwner = contractOwner;
         metadata.contractURI = contractURI;
         metadata.name = contractName;
@@ -236,9 +230,6 @@ contract CollectionManager is BaseRelayRecipient, Group, CloneFactory, MetadataM
     }
 
     /* -- IManager overrides -- */
-    function getTokenURI(address collectionAddress, uint256 tokenID) external view override returns (string memory) {
-        return collectionMetadata[collectionAddress].tokenURI;
-    }
     function getContractName(address collectionAddress) external view override returns (string memory) {
         return collectionMetadata[collectionAddress].name;
     }

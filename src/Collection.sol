@@ -11,6 +11,8 @@ contract Collection is ERC721Burnable, BaseRelayRecipient, IERC2981 {
     string public constant override versionRecipient = "1"; // For IRelayRecipient
 
     uint256 private constant MAX_ROYALTY = 10000; // 100%
+    uint256 private constant NO_CAP = 0;
+    uint256 private constant BITMASK_64 = 0xFFFFFFFFFFFFFFFF;
 
     MetadataManager private manager;
 
@@ -34,13 +36,61 @@ contract Collection is ERC721Burnable, BaseRelayRecipient, IERC2981 {
         manager = MetadataManager(_msgSender());
     }
 
+    uint64 tokenURICount;
+    mapping(uint64 => string) tokenURIs;
+    mapping(string => uint256) tokenTypes;
+    struct TokenType {
+        uint64 supply;
+        uint64 supplyCap;
+        uint64 tokenURIIndex;
+    }
+
+    mapping(uint256 => uint64) tokenURIIndices;
+
     // Managed mint of a tokenURI
-    function mint(
-        address to,
-        uint256 tokenID
-    ) public onlyManager returns (uint256) {
-        // _mint(to, tokenID);
-        return totalSupply();
+    function mintBatch(
+        string memory uri,
+        uint64 tokenSupplyCap,
+        address[] memory recipients,
+        uint256[] memory tokenIDs
+    ) public onlyManager {
+        TokenType memory tt = loadTokenType(tokenTypes[uri]);
+        if (tt.tokenURIIndex == 0) {
+            tt.supplyCap = tokenSupplyCap;
+            tt.tokenURIIndex = ++tokenURICount;
+            tokenURIs[tt.tokenURIIndex] = uri;
+        }
+
+        uint64 newTokens = uint64(tokenIDs.length);
+        uint64 newSupply = tt.supply + newTokens;
+        if (tt.supplyCap != NO_CAP) {
+            // Check for overflows and that supply is within cap.
+            require(newSupply > tt.supply && newSupply <= tt.supplyCap, "Supply capped");
+        }
+        for (uint64 i = 0; i < newTokens; i++) {
+            require(tokenURIIndices[tokenIDs[i]] == 0, "Cannot remint token");
+            tokenURIIndices[tokenIDs[i]] = tt.tokenURIIndex;
+            _mint(recipients[i], tokenIDs[i]);
+        }
+        tt.supply = newSupply;
+        storeTokenType(uri, tt);
+    }
+
+    function loadTokenType(uint256 data) internal pure returns (TokenType memory) {
+        return TokenType({
+            supply: uint64((data >> 128) & BITMASK_64),
+            supplyCap: uint64((data >> 64) & BITMASK_64),
+            tokenURIIndex: uint64(data & BITMASK_64)
+        });
+    }
+
+    function storeTokenType(string memory uri, TokenType memory tt) internal {
+        uint256 data =
+            (uint256(tt.supply) << 128) +
+            (uint256(tt.supplyCap) << 64) +
+            uint256(tt.tokenURIIndex)
+        ;
+        tokenTypes[uri] = data;
     }
 
     // Convenience method for easy transfers via CollectionManager
@@ -81,7 +131,7 @@ contract Collection is ERC721Burnable, BaseRelayRecipient, IERC2981 {
         uint256 tokenID
     ) public virtual view override returns (string memory) {
         require(_exists(tokenID), "Collection: Token not found");
-        return manager.getTokenURI(address(this), tokenID);
+        return tokenURIs[tokenURIIndices[tokenID]];
     }
 
     function name(

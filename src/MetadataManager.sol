@@ -3,7 +3,6 @@
 pragma solidity >=0.6.0;
 
 abstract contract MetadataManager {
-    function getTokenURI(address nftContract, uint256 tokenID) external virtual view returns (string memory);
     function getContractName(address nftContract) external virtual view returns (string memory);
     function getContractSymbol(address nftContract) external virtual view returns (string memory);
     function getContractOwner(address nftContract) external virtual view returns (address);
