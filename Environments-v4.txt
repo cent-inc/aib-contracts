@@ -1,0 +1,26 @@
+LOCAL
+Cent Contract: 0xfb4d0aa2321b6318fb34ee1d904f3e8a263c9e33
+Cent Contract Owner: 0x56a8b4A6ADd95ca9d3094D23E02150823e761eB3
+CollectionManager Contract: 0x0435CBC5Efab39570116833f524285912179451F
+CollectionManager Admin: 0x56a8b4A6ADd95ca9d3094D23E02150823e761eB3
+CollectionManager Member: 0x7e5781F146F03fA385F0b5bE1CeaE9B82CC2F0Ff
+
+DEV
+Cent Contract: 0xfb4d0aa2321b6318fb34ee1d904f3e8a263c9e33
+Cent Contract Owner: 0x56a8b4A6ADd95ca9d3094D23E02150823e761eB3
+CollectionManager Contract: 0x0435CBC5Efab39570116833f524285912179451F
+CollectionManager Admin: 0x56a8b4A6ADd95ca9d3094D23E02150823e761eB3
+CollectionManager Member: 0x7e5781F146F03fA385F0b5bE1CeaE9B82CC2F0Ff
+
+PROD
+Cent Contract: 0xCFF0705b5D8C1d23B2bCC87B46E2E5a6041Ae198
+Cent Contract Owner: 0xD8f20CCC2D951660F752Cc08cdf0Eac455d2D0Ba
+CollectionManager Contract: 0x7DA44F966B863DA20a1Bd20020776955d511c754
+CollectionManager Admin: 0xD8f20CCC2D951660F752Cc08cdf0Eac455d2D0Ba
+CollectionManager Member: 0x0000001d11ec9f89ae3938f4e68450cd20899ff0
+
+
+1. Deploy Cent(dropRecipient, name, symbol)
+2. Deploy CollectionManager(centContract)
+3. CollectionManager.addMember(member)
+4. Cent.setMinterEnabled(collectionManagerContract, true)

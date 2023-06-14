@@ -5,6 +5,7 @@ import './Collection.sol';
 import './MetadataManager.sol';
 import './BaseRelayRecipient.sol';
 import './Group.sol';
+import './Cent.sol';
 
 pragma experimental ABIEncoderV2;
 
@@ -17,12 +18,15 @@ contract CollectionManager is BaseRelayRecipient, Group, CloneFactory, MetadataM
 
     address private baseCollection;
 
+    address private token;
+
     mapping(string => address) private collectionAddresses;
     mapping(address => CollectionMetadata) private collectionMetadata;
     uint256 private constant MAX_ROYALTY = 10000; // 100%
 
-    constructor() public {
+    constructor(address _token) public {
         baseCollection = address(new Collection());
+        token = _token;
     }
 
     struct CollectionMetadata {
@@ -40,27 +44,32 @@ contract CollectionManager is BaseRelayRecipient, Group, CloneFactory, MetadataM
         uint256 contractRoyalty,
         string memory contractName,
         string memory contractSymbol,
-        bytes memory contractSignature,
         string memory tokenURI,
         uint64 tokenSupplyCap,
         uint256[] memory tokenIDs,
         address[] memory tokenRecipients,
-        bytes memory tokenSignature
+        bool eligible,
+        bytes memory signature
     ) external {
+        bytes32 message = ECDSA.toEthSignedMessageHash(keccak256(abi.encode(
+            contractURI,
+            contractOwner,
+            contractRoyalty,
+            contractName,
+            contractSymbol,
+            tokenURI,
+            tokenSupplyCap,
+            tokenIDs,
+            tokenRecipients,
+            eligible,
+            address(this)
+        )));
+        address signer = ECDSA.recover(message, signature);
+        require(isMember(signer), "CollectionManager: Invalid manager address");
+
         address collectionAddress = _getCollectionAddress(contractURI);
         if (collectionAddress == address(0)) {
-            bytes32 contractMsgHash = ECDSA.toEthSignedMessageHash(keccak256(abi.encode(
-                contractURI,
-                contractOwner,
-                contractRoyalty,
-                contractName,
-                contractSymbol
-            )));
-            address contractCreator = ECDSA.recover(contractMsgHash, contractSignature);
-            require(isMember(contractCreator), "CollectionManager: Invalid manager address");
-
             require(contractRoyalty <= MAX_ROYALTY, "CollectionManager: Invalid royalty");
-
             collectionAddress = _createCollection(
                 contractURI,
                 contractOwner,
@@ -70,16 +79,6 @@ contract CollectionManager is BaseRelayRecipient, Group, CloneFactory, MetadataM
             );
         }
 
-        bytes32 tokenMsgHash = ECDSA.toEthSignedMessageHash(keccak256(abi.encode(
-            contractURI,
-            tokenURI,
-            tokenSupplyCap,
-            tokenIDs,
-            tokenRecipients
-        )));
-        address tokenCreator = ECDSA.recover(tokenMsgHash, tokenSignature);
-        require(isMember(tokenCreator), "CollectionManager: Invalid manager address");
-
         require(!collectionMetadata[collectionAddress].mintEnded, "Minting ended");
 
         Collection(collectionAddress).mintBatch(
@@ -88,6 +87,9 @@ contract CollectionManager is BaseRelayRecipient, Group, CloneFactory, MetadataM
             tokenRecipients,
             tokenIDs
         );
+        if (eligible) {
+            Cent(token).onMint(contractOwner, tokenIDs.length);
+        }
     }
 
     function capBatch(

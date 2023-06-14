@@ -1,18 +1,20 @@
 // SPDX-License-Identifier: MIT
-import 'openzeppelin-solidity/contracts/token/ERC721/ERC721Burnable.sol';
 import 'openzeppelin-solidity/contracts/cryptography/ECDSA.sol';
+import './ERC721Base.sol';
 import './IERC2981.sol';
 import './MetadataManager.sol';
 import './BaseRelayRecipient.sol';
 
 pragma solidity 0.6.12;
 
-contract Collection is ERC721Burnable, BaseRelayRecipient, IERC2981 {
+contract Collection is ERC721Base, BaseRelayRecipient, IERC2981 {
     string public constant override versionRecipient = "1"; // For IRelayRecipient
 
     uint256 private constant MAX_ROYALTY = 10000; // 100%
     uint256 private constant NO_CAP = 0;
     uint256 private constant BITMASK_64 = 0xFFFFFFFFFFFFFFFF;
+
+    uint256 private tokenSupply;
 
     MetadataManager private manager;
 
@@ -26,7 +28,7 @@ contract Collection is ERC721Burnable, BaseRelayRecipient, IERC2981 {
       _;
     }
 
-    constructor() public ERC721("","") {
+    constructor() public ERC721Base("","") {
         manager = MetadataManager(_msgSender());
     }
 
@@ -68,12 +70,13 @@ contract Collection is ERC721Burnable, BaseRelayRecipient, IERC2981 {
             require(newSupply > tt.supply && newSupply <= tt.supplyCap, "Supply capped");
         }
         for (uint64 i = 0; i < newTokens; i++) {
-            require(tokenURIIndices[tokenIDs[i]] == 0, "Cannot remint token");
+            require(tokenURIIndices[tokenIDs[i]] == 0, "ERC721: token already minted");
             tokenURIIndices[tokenIDs[i]] = tt.tokenURIIndex;
             _mint(recipients[i], tokenIDs[i]);
         }
         tt.supply = newSupply;
         storeTokenType(uri, tt);
+        tokenSupply += newTokens;
     }
 
     function loadTokenType(uint256 data) internal pure returns (TokenType memory) {
@@ -112,6 +115,21 @@ contract Collection is ERC721Burnable, BaseRelayRecipient, IERC2981 {
     ) external onlyManager {
         require(_isApprovedOrOwner(from, tokenID), "Collection: Not owner");
         _burn(tokenID);
+        tokenSupply -= 1;
+    }
+
+    /**
+     * @dev Burns `tokenId`. See {ERC721-_burn}.
+     *
+     * Requirements:
+     *
+     * - The caller must own `tokenId` or be an approved operator.
+     */
+    function burn(uint256 tokenId) public virtual {
+        //solhint-disable-next-line max-line-length
+        require(_isApprovedOrOwner(_msgSender(), tokenId), "ERC721Burnable: caller is not owner nor approved");
+        _burn(tokenId);
+        tokenSupply -= 1;
     }
 
     function exists(
@@ -132,6 +150,10 @@ contract Collection is ERC721Burnable, BaseRelayRecipient, IERC2981 {
     ) public virtual view override returns (string memory) {
         require(_exists(tokenID), "Collection: Token not found");
         return tokenURIs[tokenURIIndices[tokenID]];
+    }
+
+    function totalSupply() public view returns (uint256) {
+        return tokenSupply;
     }
 
     function name(
@@ -182,7 +204,6 @@ contract Collection is ERC721Burnable, BaseRelayRecipient, IERC2981 {
     ) public view override(ERC165, IERC165) returns (bool) {
         return interfaceID == 0x80ac58cd //_INTERFACE_ID_ERC721
         || interfaceID == 0x5b5e139f //_INTERFACE_ID_ERC721_METADATA
-        || interfaceID == 0x780e9d63 //_INTERFACE_ID_ERC721_ENUMERABLE
         || interfaceID == 0x2a55205a; //_INTERFACE_ID_ERC2981
     }
 
